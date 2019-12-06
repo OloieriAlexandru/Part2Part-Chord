@@ -1,0 +1,60 @@
+
+    // cere nodului n sa gaseasca succesorul nodului cu id-ul id
+    n.find_successor(id)
+        n' = find_predecessor(id)
+        return n'.successor;
+
+    // cere nodului n sa gaseasca predecesorului nodului cu id-ul id
+    n.find_predecessor(id)
+        n' = n
+        while (id not in (n', n'.succesor])
+            n' = n'.closest_preceding_finger(id)
+        return n'
+
+    n.closest_preceding_finger(id)
+        for i = m downto 1
+            if (finger[i].node in (n, id))
+                return finger[i].node;
+        return n;
+
+    #define successor finger[1].node
+
+    // nodul n se alatura retelei
+    // n' este un nod arbitrar din retea
+    n.join(n')
+        if (n')
+            init_finger_table(n');
+            // toate nodurile din intervalul (predecessor, n] ar trebui mutate din successor
+            update_others();
+        else // n este singurul nod din retea
+            for i=1 to m
+                finger[i].node = n;
+            predecessor = n;
+
+    // initializeaza "finger table" pentru nodul n
+    // n' este un nod aleator din retea
+    n.init_finger_table(n')
+        finger[1].node = n'.find_successor(finger[1].start);
+        predecessor = successor.predecessor;
+        successor.predecessor = n;
+        for i = 1 to m - 1
+            if (finger[i+1].start in [n,finger[i].node))
+                finger[i+1].node = finger[i].node;
+            else
+                finger[i+1].node = n'.find_successor(finger[i+1].start)
+
+    // actualizeaza toate nodurile al carui "finger"
+    // ar trebui sa-l indice pe n
+    n.update_others()
+        for i = 1 to m
+            // gaseste ultimul nod p pentru care al i-lea "finger" ar putea fi n
+            p = find_predecessor(n-2^{i-1});
+            p.update_finger_table(n,i);
+
+    // daca s e al i-lea "finger" al lui n,
+    // modifica finger[i].node
+    n.update_finger_table(s,i)
+        if (s in [n, finger[i].node))
+            finger[i].node = s;
+            p = predecessor;
+            p.update_finger_table(s, i);
