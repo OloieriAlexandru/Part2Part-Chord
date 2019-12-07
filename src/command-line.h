@@ -5,10 +5,13 @@
 #include <string>
 #include <vector>
 #include <ostream>
+#include <unordered_map>
+#include <cstring>
 
 namespace cmd{
     enum commandId{
         LISTALL,
+        CLOSE,
         NOC // the type of all invalid commands
     };
 
@@ -18,60 +21,73 @@ namespace cmd{
         BOOLEAN
     };
 
-    class optionResult{
-    private:
+    class commandParser;
 
+    class optionResult{
     public:
     };
 
     class commandResult{
-    private:
-        commandId                   id;
-        std::vector<optionResult>   options;
     public:
+        commandId                       id;
+        std::vector<optionResult>       options;
+                                        commandResult();
     };
+
+    class commandOption;
 
     class commandOptionDefaultValue{
     private:
-        commandOptionType   type;
-        int                 numberValue;
-        bool                booleanValue;
-        std::string         stringValue;
+        commandOptionType               type;
+        int                             numberValue;
+        bool                            booleanValue;
+        std::string                     stringValue;
     public: 
-        void                addValue(commandOptionType optionType, void* value);
-        void*               getValue();
+        void                            addValue(commandOptionType optionType, void* value);
+        const void*                     getValue() const;
+
+        friend std::ostream&            operator<<(std::ostream& out, const commandOption& cmdOption);
     };
 
     class commandOption{
     private:
-        std::string                 name;
-        commandOptionType           type;
-        commandOptionDefaultValue   defaultValue;
+        std::string                     name;
+        commandOptionType               type;
+        commandOptionDefaultValue       defaultValue;
     public:
-                                    commandOption(std::string name);
+                                        commandOption(std::string optionName);
 
-        void                        addDefaultValue(commandOptionType optionType, void* defaultValue);
+        void                            addDefaultValue(commandOptionType optionType, void* defValue);
+    
+        friend std::ostream&            operator<<(std::ostream& out, const commandOption& cmdOption);
     };
 
     class commandInfo{
     private:
-        std::vector<commandOption>      options;
+        commandId                       id;
+        std::vector<cmd::commandOption> options;
+        std::string                     name;
         std::string                     description;
+
+        friend class                    commandParser;
     public:
-                                        commandInfo(commandId id, const char* commandDescription);
+                                        commandInfo(commandId commandId, const char* commandName, const char* commandDescription);
 
         void                            addStringOption(const char* optionName, const char* defaultValue);
         void                            addNumberOption(const char* optionName, int defaultValue);
         void                            addBooleanOption(const char* optionName, bool defaultValue);
+    
+        friend std::ostream&            operator<<(std::ostream& out, const commandInfo& cmdInfo);
     };
 
     class commandParser{
     private:
-        std::vector<commandInfo>        commands;
+        std::vector<commandInfo>                commands;
+        std::unordered_map<commandId, int>      commandIndex;
     public:
         commandResult                   parse(const std::string& str);
 
-        void                            addCommand(commandId id, const char* commandDescription);
+        void                            addCommand(commandId id, const char* commandName, const char* commandDescription);
         void                            addCommandOptionString(commandId id, const char* optionName, const char* defaultValue);
         void                            addCommandOptionNumber(commandId id, const char* optionName, int defaultValue);
         void                            addCommandOptionBoolean(commandId id, const char* optionName, bool defaultValue);

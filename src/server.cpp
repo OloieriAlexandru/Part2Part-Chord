@@ -21,6 +21,9 @@ extern int errno;
 static void* serverLogic(void *);
 int createServer();
 
+bool executeClientCommand(cmd::commandResult& command);
+void initCmd(cmd::commandParser& parser);
+
 static void* treat(void *);
 
 int a = 5;
@@ -107,13 +110,39 @@ static void* treat(void* arg) {
 void clientLogic() {
   bool clientRunning = true;
 
-  cmd::commandParser c;
+  cmd::commandParser parser;
+  initCmd(parser);
 
   while (clientRunning){
     std::string inputLine;
     std::getline(std::cin,inputLine);
 
-    cmd::commandResult info = c.parse(inputLine);
-    // executa comanda
+    cmd::commandResult info = parser.parse(inputLine);
+    clientRunning = executeClientCommand(info);
   }
+}
+
+bool executeClientCommand(cmd::commandResult& command){
+  switch (command.id){
+    case cmd::commandId::LISTALL:
+      break;
+    case cmd::commandId::CLOSE:
+      return false;
+      break;
+    case cmd::commandId::NOC:
+      std::cout<<"Invalid command!\n";
+      break;
+    default:
+      break;
+  }
+  return true;
+}
+
+void initCmd(cmd::commandParser& parser){
+  parser.addCommand(cmd::commandId::LISTALL, "list" ,"displays information about all the commands");
+  parser.addCommandOptionString(cmd::commandId::LISTALL, "-details", "no");
+  parser.addCommandOptionNumber(cmd::commandId::LISTALL, "-first", 5);
+  parser.addCommandOptionBoolean(cmd::commandId::LISTALL, "-test", false);
+
+  parser.addCommand(cmd::commandId::CLOSE, "close", "closes the application");
 }
