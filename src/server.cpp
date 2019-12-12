@@ -129,8 +129,11 @@ bool executeClientCommand(cmd::commandResult& command){
     case cmd::commandId::CLOSE:
       return false;
       break;
-    case cmd::commandId::NOC:
+    case cmd::commandId::WOC:
       std::cout<<"Invalid command!\n";
+      break;
+    case cmd::commandId::WOCOPT:
+      std::cout<<"Invalid options for command!\n";
       break;
     default:
       break;
@@ -140,8 +143,8 @@ bool executeClientCommand(cmd::commandResult& command){
 
 void initCmd(cmd::commandParser& parser){
   parser.addCommand(cmd::commandId::LISTALL, "list" ,"displays information about all the commands");
-  parser.addCommandOptionString(cmd::commandId::LISTALL, "-details", "no");
-  parser.addCommandOptionNumber(cmd::commandId::LISTALL, "-first", 5);
+  parser.addCommandOptionString(cmd::commandId::LISTALL, "-details:<yes/no>", "no");
+  parser.addCommandOptionNumber(cmd::commandId::LISTALL, "-first:<how many>", 5);
   parser.addCommandOptionBoolean(cmd::commandId::LISTALL, "-test", false);
 
   parser.addCommand(cmd::commandId::CLOSE, "close", "closes the application");

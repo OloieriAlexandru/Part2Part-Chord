@@ -12,7 +12,8 @@ namespace cmd{
     enum commandId{
         LISTALL,
         CLOSE,
-        NOC // the type of all invalid commands
+        WOC, // the type of all invalid commands
+        WOCOPT // the type for commands with invalid options
     };
 
     enum commandOptionType{
@@ -21,10 +22,28 @@ namespace cmd{
         BOOLEAN
     };
 
+    std::string commandEnumToString(commandId cmdId);
+    std::string commandOptionTypeEnumToString(commandOptionType cmdOptionType);
+
+    class commandOptionDefaultValue;
+    class commandOption;
+    class commandInfo;
     class commandParser;
 
     class optionResult{
     public:
+        commandOptionType               type;
+        int                             numberValue;
+        bool                            booleanValue;
+        std::string                     stringValue;
+        std::string                     name;
+
+                                        optionResult() {}
+                                        optionResult(const std::string optionName, const commandOptionDefaultValue& defaultValue);
+
+        void                            updateValue(void* newValue);
+
+        friend std::ostream&            operator<<(std::ostream& out, const optionResult& optResult);
     };
 
     class commandResult{
@@ -32,9 +51,16 @@ namespace cmd{
         commandId                       id;
         std::vector<optionResult>       options;
                                         commandResult();
-    };
+        void                            initOptions(const commandInfo& cmdInfo);
+        void                            updateOption(const std::string& optionName, void* newValue);
+        void                            clearOptions();
 
-    class commandOption;
+        std::string                     getStringOptionValue(const std::string& optionName);
+        int                             getNumberOptionValue(const std::string& optionName);
+        bool                            getBooleanOptionValue(const std::string& optionName);
+
+        friend std::ostream&            operator<<(std::ostream& out, const commandResult& cmdResult);
+    };
 
     class commandOptionDefaultValue{
     private:
@@ -42,6 +68,8 @@ namespace cmd{
         int                             numberValue;
         bool                            booleanValue;
         std::string                     stringValue;
+
+        friend class                    optionResult;
     public: 
         void                            addValue(commandOptionType optionType, void* value);
         const void*                     getValue() const;
@@ -54,6 +82,9 @@ namespace cmd{
         std::string                     name;
         commandOptionType               type;
         commandOptionDefaultValue       defaultValue;
+
+        friend class                    commandResult;
+        friend class                    commandParser;
     public:
                                         commandOption(std::string optionName);
 
@@ -69,6 +100,7 @@ namespace cmd{
         std::string                     name;
         std::string                     description;
 
+        friend class                    commandResult;
         friend class                    commandParser;
     public:
                                         commandInfo(commandId commandId, const char* commandName, const char* commandDescription);
@@ -84,6 +116,9 @@ namespace cmd{
     private:
         std::vector<commandInfo>                commands;
         std::unordered_map<commandId, int>      commandIndex;
+
+        bool                                    parseAndCheckOptionValue(char arguments[], int startPos, int lastPos, const cmd::commandOption& opt, int position, cmd::commandResult& result);
+        bool                                    parseOption(char arguments[], int firstPos, int lastPos, int cmdIndex, cmd::commandResult& result);
     public:
         commandResult                   parse(const std::string& str);
 
