@@ -338,6 +338,10 @@ cmd::commandResult cmd::commandParser::parse(const std::string& str){
     }
 
     char* arguments = strtok(stringCmd, " \t\n");
+    if (!arguments){
+        result.id = cmd::commandId::EMPTYLINE;
+        return result;
+    }
     std::string enteredCommand(arguments);
 
     int cmdIndex = -1;

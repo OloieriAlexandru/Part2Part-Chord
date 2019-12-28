@@ -11,6 +11,8 @@
 #include "constants.h"
 #include "command-line.h"
 
+uint    getCustomHash(const char* str);
+
 bool    fileExists(const char* filePath);
 
 bool    configFileGetFlagValue();

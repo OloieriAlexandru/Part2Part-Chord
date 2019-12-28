@@ -1,5 +1,19 @@
 #include "helper.h"
 
+uint getCustomHash(const char* str){
+    if (!str){
+        return 0u;
+    }
+    ulld res = 0u;
+    uint index = 0u, basePow = 1u;
+    while (str[index]){
+        res = (res + (ulld)1 * basePow * str[index]) % CUSTOM_HASH_MOD;
+        basePow = ((ulld)1 * basePow * CUSTOM_HASH_BASE) % CUSTOM_HASH_MOD;
+        ++index;
+    }
+    return (uint)res;
+}
+
 bool fileExists(const char* filePath) {
     if (!filePath || access(filePath, F_OK) == -1){
         return false;

@@ -15,7 +15,7 @@ struct node {
 
 struct fingersTable {
     node            predecessor;
-    node            fingers[HASH_BITS];
+    node            fingers[SHA_HASH_BITS];
 };
 
 struct nodeInfo {
@@ -26,11 +26,12 @@ struct nodeInfo {
 struct sharedFileInfo {
     std::string name;
     std::string path;
-    uint        hsh;
-    sharedFileInfo(const std::string& fileName, const std::string& filePath, uint h = 0){
+    uint        sha_hash, custom_hash;
+    sharedFileInfo(const std::string& fileName, const std::string& filePath, uint h1 = 0, uint h2 = 0){
         name = fileName;
         path = filePath;
-        hsh = h;
+        custom_hash = h1;
+        sha_hash = h2;
     }
 };
 

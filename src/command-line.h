@@ -12,6 +12,8 @@ namespace cmd{
     enum commandId{
         ADD_FILE,
         SEARCH_FILE,
+        DOWNLOAD_FILE,
+        LIST_FILES_TO_DOWNLOAD,
         LIST_FILES,
         CONFIG_ADD_FILE,
         CONFIG_REMOVE_FILE,
@@ -20,6 +22,7 @@ namespace cmd{
         CONFIG_AUTO_ADD,
         LISTALL,
         CLOSE,
+        EMPTYLINE, // returned when the entered line is empty
         WOC, // the type of all invalid commands
         WOCOPT // the type for commands with invalid options
     };
