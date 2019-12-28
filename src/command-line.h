@@ -10,6 +10,14 @@
 
 namespace cmd{
     enum commandId{
+        ADD_FILE,
+        SEARCH_FILE,
+        LIST_FILES,
+        CONFIG_ADD_FILE,
+        CONFIG_REMOVE_FILE,
+        CONFIG_REMOVE_ALL,
+        CONFIG_LIST_FILES,
+        CONFIG_AUTO_ADD,
         LISTALL,
         CLOSE,
         WOC, // the type of all invalid commands
@@ -55,9 +63,9 @@ namespace cmd{
         void                            updateOption(const std::string& optionName, void* newValue);
         void                            clearOptions();
 
-        std::string                     getStringOptionValue(const std::string& optionName);
-        int                             getNumberOptionValue(const std::string& optionName);
-        bool                            getBooleanOptionValue(const std::string& optionName);
+        std::string                     getStringOptionValue(const std::string& optionName) const;
+        int                             getNumberOptionValue(const std::string& optionName) const;
+        bool                            getBooleanOptionValue(const std::string& optionName) const;
 
         friend std::ostream&            operator<<(std::ostream& out, const commandResult& cmdResult);
     };

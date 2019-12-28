@@ -124,7 +124,7 @@ namespace cmd{
     }
 }
 
-std::string cmd::commandResult::getStringOptionValue(const std::string& optionName){
+std::string cmd::commandResult::getStringOptionValue(const std::string& optionName) const{
     for (auto& option:options){
         if (option.name == optionName){
             if (option.type != cmd::commandOptionType::STRING){
@@ -136,7 +136,7 @@ std::string cmd::commandResult::getStringOptionValue(const std::string& optionNa
     return "";
 }
 
-int cmd::commandResult::getNumberOptionValue(const std::string& optionName){
+int cmd::commandResult::getNumberOptionValue(const std::string& optionName) const{
     for (auto& option:options){
         if (option.name == optionName){
             if (option.type != cmd::commandOptionType::NUMBER){
@@ -148,7 +148,7 @@ int cmd::commandResult::getNumberOptionValue(const std::string& optionName){
     return 0;
 }
 
-bool cmd::commandResult::getBooleanOptionValue(const std::string& optionName){
+bool cmd::commandResult::getBooleanOptionValue(const std::string& optionName) const{
     for (auto& option:options){
         if (option.name == optionName){
             if (option.type != cmd::commandOptionType::BOOLEAN){
