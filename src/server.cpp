@@ -38,6 +38,7 @@ void          serverSendErrorFlag(int sd);
 void          serverDownloadFileLogic(int sd);
 void          serverDownloadFileUpload(int sd, sharedFileInfo* sharedFile);
 void          serverListFilesToDownloadLogic(int sd);
+bool          serverListFilesToDownloadSendFile(int sd, sharedFileInfo* sharedFile);
 
 static void*  serverLogic(void *);
 int           createServer();
@@ -138,7 +139,7 @@ void listSharedFiles() {
   printf("Shared files: \n");
   for (auto bucket : sharedFiles){
     for (auto file : bucket.second) {
-      printf("%d. name:%s path:%s id:%u\n", fileNumber++, file.name.c_str(), file.path.c_str(), file.custom_hash);
+      printf("%d. name:%s path:%s id:%u\n", fileNumber++, file.name.c_str(), file.path.c_str(), file.customHash);
     }
   }
 }
@@ -173,7 +174,7 @@ void serverDownloadFileLogic(int sd) {
   }
   sharedFileInfo* requestedFile = NULL;
   for (auto &file : sharedFiles[fileName]){
-    if (file.custom_hash == fileId){
+    if (file.customHash == fileId){
       requestedFile = &file;
       break;
     }
@@ -220,11 +221,68 @@ void serverDownloadFileUpload(int sd, sharedFileInfo* sharedFile) {
       return;
     }
   }
-  printf("File share complete!\n");
 }
 
 void serverListFilesToDownloadLogic(int sd) {
+  uint fileNameLen;
+  if (-1 == read(sd, &fileNameLen, 4)){
+    printf("[server]Failed to read the length of the file name!\n");
+    return;
+  }
+  if (!fileNameLen){
+    uint filesNumber = 0;
+    for (auto& bucket:sharedFiles){
+      filesNumber += bucket.second.size();
+    }
+    if (-1 == write(sd, &filesNumber, 4)){
+      printf("[server]Failed to send the number of files to the client!\n");
+      return;
+    }
+    for (auto& bucket:sharedFiles){
+      bool good = true;
+      for (auto& sharedFiles:bucket.second){
+        if (!serverListFilesToDownloadSendFile(sd, &sharedFiles)){
+          good = false;
+          break;
+        }
+      }
+      if (!good){
+        break;
+      }
+    }
+  } else {
+    std::string fileName;
+    fileName.resize(fileNameLen);
+    for (int i=0;i<fileNameLen;++i){
+      if (-1 == read(sd, &fileName[i], 1)){
+        printf("[server]Failed to read the %d th byte of the file name!\n", i+1);
+        return;
+      }
+    }
+    uint filesNumber = sharedFiles[fileName].size();
+    if (-1 == write(sd, &filesNumber, 4)){
+      printf("[server]Failed to send the number of files to the client!\n");
+      return;
+    }
+    for (auto& sharedFile:sharedFiles[fileName]){
+      if (!serverListFilesToDownloadSendFile(sd, &sharedFile)){
+        break;
+      }
+    }
+  }
+}
 
+bool serverListFilesToDownloadSendFile(int sd, sharedFileInfo* sharedFile) {
+  if (!sharedFile){
+    return false;
+  }
+  uint fileSize = sharedFile->name.size();
+  if (-1 == write(sd, &fileSize, 4) || -1 == write(sd, sharedFile->name.c_str(), fileSize) ||
+    -1 == write(sd, &sharedFile->customHash, 4)){
+      printf("[server]Error when sending data about a file to the client!\n");
+      return false;
+    }
+  return true;
 }
 
 static void* serverLogic(void *) {
@@ -372,7 +430,7 @@ void clientDownloadFileLogic(const cmd::commandResult& command) {
 
 void clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId) {
   std::string fileIdAsString = std::to_string(fileId);
-  std::string newFileName = std::string(userDownloadsFolder) + fileName + fileIdAsString + std::string(userDownloadsExtension);
+  std::string newFileName = std::string(userDownloadsFolder) + fileName + std::string("::") + fileIdAsString + std::string(userDownloadsExtension);
   if (!fileExists(newFileName.c_str())){
     if (!fileCreate(newFileName.c_str())){
       printf("[client]Failed to create new file named %s\n", newFileName.c_str());
@@ -407,7 +465,76 @@ void clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId
 }
 
 void clientListFilesToDownloadLogic(const cmd::commandResult& command) {
+  std::string peerIp    = command.getStringOptionValue("-ip");
+  if (peerIp == "none"){
+    printf("[client]You have to specify the ip of the peer whose files names you want to get!\n");
+    return;
+  }
+  int peerPort          = command.getNumberOptionValue("-port");
+  if (peerPort == -1){
+    printf("[client]You have to specify the port of the peer whose files names you want to get!\n");
+    return;
+  }
+  int sd;
+  if (!initClient(sd, peerIp.c_str(), peerPort)){
+    return;
+  }
 
+  std::string fileName  = command.getStringOptionValue("-name");
+  uint request = SRV_LIST_FILES, fileNameLen = fileName.size(), filesNumber, peerFileNameLen, peerFileId;
+  std::string peerFileName;
+
+  if (-1 == write(sd, &request, 4) || -1 == write(sd, &fileNameLen, 4)){    
+    printf("[client]Failed to send protocol info to the server!\n");
+    close(sd);
+    return;
+  }
+  if (fileNameLen){
+    if (-1 == write(sd, fileName.c_str(), fileNameLen)){
+      printf("[client]Failed to send the name to the server!\n");
+      close(sd);
+      return;
+    }
+  }
+  if (-1 == read(sd, &filesNumber, 4)){
+    printf("[client]Failed to read the number of files the peer shares!\n");
+    close(sd);
+    return;
+  }
+
+  if (filesNumber){
+    printf("The peer shares %d files", filesNumber);
+    if (fileNameLen){
+      printf(" that match the file name you entered");
+    }
+    printf(":\n");
+    for (int i=1;i<=filesNumber;++i){
+      if (-1 == read(sd, &peerFileNameLen, 4)){
+        printf("[client]Failed to read the file name length of the %dth file from the list!\n", i);
+        break;
+      }
+      peerFileName.resize(peerFileNameLen);
+      int j;
+      for (j=0;j<peerFileNameLen;++j){
+        if (-1 == read(sd, &peerFileName[j], 1)){
+          printf("[client]Failed to read the %dth character of the file name number %d from the list!\n", j+1, i);
+          break;
+        }
+      }
+      if (j < peerFileNameLen){
+        break;
+      }
+      if (-1 == read(sd, &peerFileId, 4)){
+        printf("[client]Failed to read the file id of the %dth file from the list!", i);
+        break;
+      }
+      printf("%d. File name: %s, File id: %d\n", i, peerFileName.c_str(), peerFileId);
+    }
+  } else {
+    printf("[client]The peer you sent the request doesn't share any files at the moment that match your criteria!\n");
+  }
+
+  close(sd);
 }
 
 bool initClient(int& sd, const char* ipAddress, int port) {
@@ -503,8 +630,9 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommandOptionNumber(cmd::commandId::DOWNLOAD_FILE, "-id:<fileId>", -1);
   parser.addCommandOptionNumber(cmd::commandId::DOWNLOAD_FILE, "-port:<peerPort>", -1);
 
-  parser.addCommand(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "list-to-down", "requests a peer to send information about all the file it shares");
+  parser.addCommand(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "list", "requests a peer to send information about all the file it shares");
   parser.addCommandOptionString(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "-ip:<peerIP>", "none");
+  parser.addCommandOptionString(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "-name:<fileName>", "");
   parser.addCommandOptionNumber(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "-port:<peerPort>", -1);
 
   parser.addCommand(cmd::commandId::LIST_FILES, "list-files", "lists all my shared files");
@@ -524,7 +652,7 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommandOptionBoolean(cmd::commandId::CONFIG_AUTO_ADD, "-enable", false);
   parser.addCommandOptionBoolean(cmd::commandId::CONFIG_AUTO_ADD, "-disable", false);
 
-  parser.addCommand(cmd::commandId::LISTALL, "list" ,"displays information about all the commands");
+  parser.addCommand(cmd::commandId::LISTALL, "list-cmd" ,"displays information about all the commands");
 
   parser.addCommand(cmd::commandId::CLOSE, "close", "closes the application");
 }

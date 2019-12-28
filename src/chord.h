@@ -26,12 +26,12 @@ struct nodeInfo {
 struct sharedFileInfo {
     std::string name;
     std::string path;
-    uint        sha_hash, custom_hash;
+    uint        shaHash, customHash;
     sharedFileInfo(const std::string& fileName, const std::string& filePath, uint h1 = 0, uint h2 = 0){
         name = fileName;
         path = filePath;
-        custom_hash = h1;
-        sha_hash = h2;
+        customHash = h1;
+        shaHash = h2;
     }
 };
 

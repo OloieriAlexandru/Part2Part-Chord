@@ -37,6 +37,7 @@
 #define     SRV_LIST_FILES                  11                      // ---
 //          client:
 //          uint                            - fileNameLen
+//          char[fileNameLen]               - fileName
 //         *if fileNameLen == 0, send info about all my files
 //          server:
 //          uint                            - filesNumber
