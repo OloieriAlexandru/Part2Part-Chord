@@ -14,6 +14,19 @@ uint getCustomHash(const char* str){
     return (uint)res;
 }
 
+uint getFileSize(const char* filePath) {
+    struct stat st;
+    stat(filePath, &st);
+    return st.st_size;
+}
+
+bool fileCreate(const char* fileName){
+    if (-1 == creat(fileName, S_IRWXU)){
+        return false;
+    }
+    return true;
+}
+
 bool fileExists(const char* filePath) {
     if (!filePath || access(filePath, F_OK) == -1){
         return false;
@@ -31,13 +44,6 @@ bool configFileGetFlagValue() {
     fileIn >> autoAdd;
     fileIn.close();
     return (autoAdd == 1);
-}
-
-bool fileCreate(const char* fileName){
-    if (-1 == creat(fileName, S_IRWXU)){
-        return false;
-    }
-    return true;
 }
 
 bool configFileExists() {

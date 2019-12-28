@@ -36,6 +36,7 @@ void          listSharedFiles();
 
 void          serverSendErrorFlag(int sd);
 void          serverDownloadFileLogic(int sd);
+void          serverDownloadFileUpload(int sd, sharedFileInfo* sharedFile);
 void          serverListFilesToDownloadLogic(int sd);
 
 static void*  serverLogic(void *);
@@ -47,6 +48,7 @@ void          initCmd(cmd::commandParser& parser);
 static void*  treat(void *);
 
 void          clientDownloadFileLogic(const cmd::commandResult& command);
+void          clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId);
 void          clientListFilesToDownloadLogic(const cmd::commandResult& command);
 
 bool          initClient(int& sd, const char* ipAddress, int port);
@@ -177,13 +179,48 @@ void serverDownloadFileLogic(int sd) {
     }
   }
   response = (requestedFile == NULL ? SRV_DOWNLOAD_FILE_NOT_EXISTS : SRV_DOWNLOAD_FILE_OK_BEGIN);
+  if (response == SRV_DOWNLOAD_FILE_OK_BEGIN){
+    if (!fileExists(requestedFile->path.c_str())){
+      response = SRV_DOWNLOAD_NOT_AVAILABLE;
+    }
+  }
   if (-1 == write(sd, &response, 4)){
     printf("[server]Failed to send the response to the client!\n");
     return;
   }
   if (response == SRV_DOWNLOAD_FILE_OK_BEGIN){
-    printf("I will send the file to the client!\n");
+    serverDownloadFileUpload(sd, requestedFile);
   }
+}
+
+void serverDownloadFileUpload(int sd, sharedFileInfo* sharedFile) {
+  char package[PACKAGE_SIZE];
+  uint fileSize = getFileSize(sharedFile->path.c_str());
+  int fd;
+  if (-1 == (fd = open(sharedFile->path.c_str(), O_RDONLY))){
+    printf("[server]Failed to open the file to share!\n");
+    return;
+  }
+  uint packages = fileSize / PACKAGE_SIZE + (fileSize % PACKAGE_SIZE ? 1 : 0);
+  if (-1 == write(sd, &packages, 4)){
+    printf("[server]Failed to sent the number of packages to the client!\n");
+    return;
+  }
+  uint currentPackageSize = PACKAGE_SIZE;
+  for (int i=1;i<=packages;++i){
+    if (i == packages){
+      currentPackageSize = ((fileSize % PACKAGE_SIZE != 0) ? fileSize % PACKAGE_SIZE : PACKAGE_SIZE);
+    }
+    if (-1 == read(fd, package, currentPackageSize)){
+      printf("[server]Failed to read package number %d from the file!\n", i);
+      return;
+    }
+    if (-1 == write(sd, &currentPackageSize, 4) || -1 == write(sd, package, currentPackageSize)){
+      printf("[server]Failed to send information about the package number %d to the client!\n", i);
+      return;
+    }
+  }
+  printf("File share complete!\n");
 }
 
 void serverListFilesToDownloadLogic(int sd) {
@@ -320,15 +357,53 @@ void clientDownloadFileLogic(const cmd::commandResult& command) {
     return;
   }
   if (response == SRV_DOWNLOAD_FILE_OK_BEGIN){
-    printf("Start downloading!\n");
-  } else if (response == SRV_DOWNLOAD_FILE_NOT_EXISTS){
+    clientDownloadFileDownload(sd, fileName, fileId);
+  } else if (response == SRV_DOWNLOAD_FILE_NOT_EXISTS) {
     printf("[client]The peer claims the entered fileName+fileId does not match any of its file!\n");
+  } else if (response == SRV_DOWNLOAD_NOT_AVAILABLE) {
+    printf("[client]The peer doesn't have the file on his PC anymore!\n");
+  } else if (response == SRV_ERROR) {
+    printf("[client]The server crashed!\n");
   } else {
     printf("[client]Internal error!\n");
-    close(sd);
-    return;
   }
   close(sd);
+}
+
+void clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId) {
+  std::string fileIdAsString = std::to_string(fileId);
+  std::string newFileName = std::string(userDownloadsFolder) + fileName + fileIdAsString + std::string(userDownloadsExtension);
+  if (!fileExists(newFileName.c_str())){
+    if (!fileCreate(newFileName.c_str())){
+      printf("[client]Failed to create new file named %s\n", newFileName.c_str());
+      return;
+    }
+    int fd = open(newFileName.c_str(), O_WRONLY);
+    if (-1 == fd){
+      printf("[client]Failed to open the file where the information is supposed to be downloaded %s\n", newFileName.c_str());
+      return;
+    }
+    char package[PACKAGE_SIZE];
+    uint packagesNumber, currentPackageSize;
+    if (-1 == read(sd, &packagesNumber, 4)){
+      printf("[client]Failed to read the number of packages that were about to be sent!\n");
+      return;
+    }
+    for (int i=1;i<=packagesNumber;++i){
+      if (-1 == read(sd, &currentPackageSize, 4) || -1 == read(sd, package, currentPackageSize)){
+        printf("[client]Error when reading package number %d from the network!\n", i);
+        return;
+      }
+      if (-1 == write(fd, package, currentPackageSize)){
+        printf("[client]Error when writing package number %d to the file!\n", i);
+        return;
+      }
+    }
+    close(fd);
+    printf("Download complete!\n");
+  } else {
+    // to do?
+  }
 }
 
 void clientListFilesToDownloadLogic(const cmd::commandResult& command) {

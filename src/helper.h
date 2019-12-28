@@ -13,6 +13,8 @@
 
 uint    getCustomHash(const char* str);
 
+uint    getFileSize(const char* filePath);
+bool    fileCreate(const char* fileName);
 bool    fileExists(const char* filePath);
 
 bool    configFileGetFlagValue();

@@ -3,7 +3,7 @@
 
 // The ids of the operations the server can execute + information about what will be sent by the client
 
-#define     SRV_ERROR                       0
+#define     SRV_ERROR                       0                       // ---
 //          -
 #define     SRV_FIND_SUCCESSOR              1                       // ---
 //          uint                            - id
@@ -26,12 +26,15 @@
 #define     SRV_DOWNLOAD_FILE_NOT_EXISTS    100
 //          client:
 //          endOperation
-#define     SRV_DOWNLOAD_FILE_OK_BEGIN      101
+#define     SRV_DOWNLOAD_NOT_AVAILABLE      101
+//          client:
+//          endOperation
+#define     SRV_DOWNLOAD_FILE_OK_BEGIN      102
 //          uint                            - numberOfPackages (1024 bytes each)
 //          numberOfPackages times:
 //          uint                            - packageSize
-//          char[packageSize]              - packageInfo
-#define     SRV_LIST_FILES                  11
+//          char[packageSize]               - packageInfo
+#define     SRV_LIST_FILES                  11                      // ---
 //          client:
 //          uint                            - fileNameLen
 //         *if fileNameLen == 0, send info about all my files
