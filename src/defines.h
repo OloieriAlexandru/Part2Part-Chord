@@ -11,6 +11,8 @@
 //          -
 #define     SRV_GET_PREDECESSOR             3                       // ---
 //          -
+#define     SRV_FIND_PREDECESSOR            5                       // ---
+//          uint                            - id
 #define     SRV_ADD_FILE                    4                       // ---
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
@@ -26,7 +28,7 @@
 #define     SRV_DOWNLOAD_FILE_NOT_EXISTS    100
 //          client:
 //          endOperation
-#define     SRV_DOWNLOAD_NOT_AVAILABLE      101
+#define     SRV_DOWNLOAD_FILE_NOT_AVAILABLE 101
 //          client:
 //          endOperation
 #define     SRV_DOWNLOAD_FILE_OK_BEGIN      102

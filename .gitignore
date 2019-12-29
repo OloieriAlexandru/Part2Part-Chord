@@ -1,4 +1,5 @@
 /build/*
 /downloads/*
+/.user.config
 
 !/build/.gitkeep

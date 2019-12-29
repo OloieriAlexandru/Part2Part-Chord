@@ -5,7 +5,7 @@ BUILDFOLDER=build
 all: clean release
 
 release: clean
-	${CCPP} ./${SRCFOLDER}/server.cpp ./${SRCFOLDER}/command-line.cpp ./${SRCFOLDER}/helper.cpp -o ./${BUILDFOLDER}/server.bin -lpthread
+	${CCPP} ./${SRCFOLDER}/server.cpp ./${SRCFOLDER}/command-line.cpp ./${SRCFOLDER}/helper.cpp ./${SRCFOLDER}/hash/sha1.cpp ./${SRCFOLDER}/chord.cpp -o ./${BUILDFOLDER}/server.bin -lpthread
 	${CCPP} ./${SRCFOLDER}/client.cpp -o ./${BUILDFOLDER}/client.bin -lpthread
 
 runcl: 

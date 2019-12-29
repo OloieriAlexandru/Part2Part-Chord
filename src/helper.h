@@ -7,10 +7,14 @@
 #include <fcntl.h>
 #include <fstream>
 #include <string>
+#include <iostream>
+
+#include "hash/sha1.h"
 
 #include "constants.h"
 #include "command-line.h"
 
+uint    getHash(SHA1& sha1, const char* str);
 uint    getCustomHash(const char* str);
 
 uint    getFileSize(const char* filePath);

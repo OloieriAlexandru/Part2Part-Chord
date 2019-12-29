@@ -1,5 +1,16 @@
 #include "helper.h"
 
+uint getHash(SHA1& sha1, const char *str){
+    std::string hsh = sha1(str);
+    uint res = 0, pw = 1, mul;
+    for (int i=hsh.size()-1;i>=0;--i){
+        mul = (hsh[i] >= '0' && hsh[i] <= '9' ? hsh[i]-'0':hsh[i]-'a'+10);
+        res = ((ulld)1 * pw * mul + res) & SHA_HASH_MOD;
+        pw = (pw * 16) & SHA_HASH_MOD;
+    }
+    return res;
+}
+
 uint getCustomHash(const char* str){
     if (!str){
         return 0u;

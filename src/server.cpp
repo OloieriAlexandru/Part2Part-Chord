@@ -30,6 +30,9 @@ void shareFilesFromConfigFile();
 nodeInfo                                        info;
 umap<std::string,std::vector<sharedFileInfo>>   sharedFiles;
 
+SHA1          sha1;
+uint          getHash(const char* str);
+
 void          shareFile(const std::string& name, const std::string& path, bool atInit = false);
 void          shareFile(const cmd::commandResult& command);
 void          listSharedFiles();
@@ -39,6 +42,11 @@ void          serverDownloadFileLogic(int sd);
 void          serverDownloadFileUpload(int sd, sharedFileInfo* sharedFile);
 void          serverListFilesToDownloadLogic(int sd);
 bool          serverListFilesToDownloadSendFile(int sd, sharedFileInfo* sharedFile);
+
+void          serverFindSuccessor(int sd);
+void          serverFindPredecessor(int sd);
+void          serverSendSuccessor(int sd);
+void          serverSendPredecessor(int sd);
 
 static void*  serverLogic(void *);
 int           createServer();
@@ -91,6 +99,8 @@ bool check(int argc, char* argv[]){
     info.me.port = info.me.port * 10 + (argv[1][digitsNo++] - '0');
   }
   info.me.address = std::string("127.0.0.1");
+  std::string keyStr = info.me.address + std::to_string(info.me.port);
+  info.me.key = getHash(keyStr.c_str());
   return true;
 }
 
@@ -110,6 +120,10 @@ void shareFilesFromConfigFile() {
     shareFile(name, path, true);
   }
   fileIn.close();
+}
+
+uint getHash(const char* str) {
+  return getHash(sha1, str);
 }
 
 void shareFile(const std::string& name, const std::string& path, bool atInit) {
@@ -182,7 +196,7 @@ void serverDownloadFileLogic(int sd) {
   response = (requestedFile == NULL ? SRV_DOWNLOAD_FILE_NOT_EXISTS : SRV_DOWNLOAD_FILE_OK_BEGIN);
   if (response == SRV_DOWNLOAD_FILE_OK_BEGIN){
     if (!fileExists(requestedFile->path.c_str())){
-      response = SRV_DOWNLOAD_NOT_AVAILABLE;
+      response = SRV_DOWNLOAD_FILE_NOT_AVAILABLE;
     }
   }
   if (-1 == write(sd, &response, 4)){
@@ -285,6 +299,22 @@ bool serverListFilesToDownloadSendFile(int sd, sharedFileInfo* sharedFile) {
   return true;
 }
 
+void serverFindSuccessor(int sd) {
+
+}
+
+void serverFindPredecessor(int sd) {
+
+}
+
+void serverSendSuccessor(int sd) {
+  sendNodeInfo(sd, info.fTable.fingers[0]);
+}
+
+void serverSendPredecessor(int sd) {
+  sendNodeInfo(sd, info.fTable.predecessor);
+}
+
 static void* serverLogic(void *) {
 	pthread_detach(pthread_self());
 
@@ -350,10 +380,16 @@ static void* treat(void* arg) {
   switch (option){
     // Chord functionalities:
     case SRV_FIND_SUCCESSOR:
+      serverFindSuccessor(sd);
       break;
     case SRV_GET_SUCCESSOR:
+      serverSendSuccessor(sd);
       break;
     case SRV_GET_PREDECESSOR:
+      serverSendPredecessor(sd);
+      break;
+    case SRV_FIND_PREDECESSOR:
+      serverFindPredecessor(sd);
       break;
     case SRV_ADD_FILE:
       break;
@@ -418,7 +454,7 @@ void clientDownloadFileLogic(const cmd::commandResult& command) {
     clientDownloadFileDownload(sd, fileName, fileId);
   } else if (response == SRV_DOWNLOAD_FILE_NOT_EXISTS) {
     printf("[client]The peer claims the entered fileName+fileId does not match any of its file!\n");
-  } else if (response == SRV_DOWNLOAD_NOT_AVAILABLE) {
+  } else if (response == SRV_DOWNLOAD_FILE_NOT_AVAILABLE) {
     printf("[client]The peer doesn't have the file on his PC anymore!\n");
   } else if (response == SRV_ERROR) {
     printf("[client]The server crashed!\n");
@@ -561,6 +597,7 @@ void clientLogic() {
   initCmd(parser);
 
   while (clientRunning){
+    std::cout<<"node"<<info.me.key<<"@chord: ";
     std::string inputLine;
     std::getline(std::cin,inputLine);
 
