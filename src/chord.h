@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include <string>
+#include <ostream>
 
 #include "constants.h"
 
@@ -13,6 +14,13 @@ struct node {
     uint            key;
     uint            port;
     std::string     address;
+    node() {
+        key = 0;
+        port = 0;
+    }
+    friend bool             operator==(const node& n1, const node& n2);
+    friend bool             operator!=(const node& n1, const node& n2);
+    friend std::ostream&    operator<<(std::ostream& out, const node& nd);
 };
 
 struct fingersTable {
@@ -21,12 +29,13 @@ struct fingersTable {
 };
 
 struct nodeInterval{
-
+    int             start, end;
 };
 
 struct nodeInfo {
     fingersTable    fTable;
     node            me;
+    nodeInterval    intervals[SHA_HASH_BITS];
 };
 
 extern nodeInfo info;
@@ -43,7 +52,12 @@ struct sharedFileInfo {
     }
 };
 
-bool    between(uint id, uint l, uint r);
+void    printThisChordNodeInfo();
+void    initFirstChordNode();
+void    initMyIntervals();
+
+int     normalizeValue(int value);
+bool    between(int id, int l, int r);
 node    closestPrecedingFinger(uint id);
 
 bool    sendNodeInfo(int sd, const uint key, const uint port, const std::string& address);

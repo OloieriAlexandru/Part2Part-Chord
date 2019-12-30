@@ -12,7 +12,7 @@ runcl:
 	./${BUILDFOLDER}/client.bin
 
 runsv:
-	./${BUILDFOLDER}/server.bin 2908
+	./${BUILDFOLDER}/server.bin 3500
 
 clean:
 	rm -f ${BUILDFOLDER}/server.bin

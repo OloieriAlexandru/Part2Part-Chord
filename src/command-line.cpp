@@ -2,10 +2,34 @@
 
 std::string cmd::commandEnumToString(cmd::commandId cmdId){
     switch(cmdId){
+        case cmd::commandId::ADD_FILE:
+            return "add";
+        case cmd::commandId::SEARCH_FILE:
+            return "search";
+        case cmd::commandId::DOWNLOAD_FILE:
+            return "download";
+        case cmd::commandId::LIST_FILES_TO_DOWNLOAD:
+            return "list";
+        case cmd::commandId::LIST_FILES:
+            return "list-files";
+        case cmd::commandId::CONFIG_ADD_FILE:
+            return "config-add-file";
+        case cmd::commandId::CONFIG_REMOVE_FILE:
+            return "config-rm-file";
+        case cmd::commandId::CONFIG_REMOVE_ALL:
+            return "config-rm-all";
+        case cmd::commandId::CONFIG_LIST_FILES:
+            return "config-list";
+        case cmd::commandId::CONFIG_AUTO_ADD:
+            return "config-auto-add";
+        case cmd::commandId::CHORD_NODE_INFO:
+            return "chord-info";
         case cmd::commandId::LISTALL:
             return "list";
         case cmd::commandId::CLOSE:
             return "close";
+        case cmd::commandId::EMPTYLINE:
+            return "empty line command";
         case cmd::commandId::WOC:
             return "wrong command";
         case cmd::commandId::WOCOPT:

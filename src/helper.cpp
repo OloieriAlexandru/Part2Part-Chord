@@ -1,5 +1,16 @@
 #include "helper.h"
 
+void debugMessage(const char* format, ...){
+    if (!DEBUG){
+        return;
+    }
+    va_list args;
+    va_start(args, format);
+	printf("\nChord node %u: ", info.me.key);
+    vprintf(format, args);
+	va_end(args);
+}
+
 uint getHash(SHA1& sha1, const char *str){
     std::string hsh = sha1(str);
     uint res = 0, pw = 1, mul;

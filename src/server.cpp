@@ -24,11 +24,18 @@
 
 extern int errno;
 
-bool check(int argc, char* argv[]);
-void shareFilesFromConfigFile();
+node    getFirstNodeInfo();
+bool    isFirstChordNode(const std::string& address, uint port);
+bool    check(int argc, char* argv[]);
+void    shareFilesFromConfigFile();
 
 nodeInfo                                        info;
 umap<std::string,std::vector<sharedFileInfo>>   sharedFiles;
+
+void          joinChordNetwork();
+void          joinChordNetwork(const node& randomNode);
+void          initFingerTable(const node& randomNode);
+void          updateOthers();
 
 SHA1          sha1;
 uint          getHash(const char* str);
@@ -43,15 +50,24 @@ void          serverDownloadFileUpload(int sd, sharedFileInfo* sharedFile);
 void          serverListFilesToDownloadLogic(int sd);
 bool          serverListFilesToDownloadSendFile(int sd, sharedFileInfo* sharedFile);
 
+node          serverFindSucc(const node& nd, uint id);
+node          serverFindSucc(uint id);
 void          serverFindSuccessor(int sd);
+node          serverGetPred(const node& nd);
+node          serverFindPred(uint id);
 void          serverFindPredecessor(int sd);
+node          serverSendSuccessorRequest(int sd);
 void          serverSendSuccessor(int sd);
 void          serverSendPredecessor(int sd);
+void          serverUpdatePredecessorRequest(const node& nd);
+void          serverUpdatePredecessor(int sd);
+void          serverUpdateFingerTable(int sd);
+void          serverUpdateFingerTable(const node& p, const node& nd, uint i);
 
 static void*  serverLogic(void *);
 int           createServer();
 
-bool          executeClientCommand(cmd::commandResult& command);
+bool          executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& command);
 void          initCmd(cmd::commandParser& parser);
 
 static void*  treat(void *);
@@ -72,7 +88,6 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "[main]Error when creating/checking the config file!");
     return 1;
   }
-  shareFilesFromConfigFile();
 
   pthread_t serverThread;
   if (pthread_create(&serverThread, NULL, serverLogic, NULL)){
@@ -80,9 +95,23 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
+  shareFilesFromConfigFile();
+  joinChordNetwork();
+
   clientLogic();
   return 0;
 };
+
+node getFirstNodeInfo(){
+  node res;
+  res.address = "127.0.0.1";
+  res.port = CHORD_FIRST_PORT;
+  return res;
+}
+
+bool isFirstChordNode(const std::string& address, uint port){
+  return (address == "127.0.0.1" && port == CHORD_FIRST_PORT);
+}
 
 bool check(int argc, char* argv[]){
   if (argc != 2){
@@ -120,6 +149,44 @@ void shareFilesFromConfigFile() {
     shareFile(name, path, true);
   }
   fileIn.close();
+}
+
+void joinChordNetwork() {
+  initMyIntervals();
+  if (isFirstChordNode(info.me.address, info.me.port)){
+    initFirstChordNode();
+  } else {
+    node firstNode = getFirstNodeInfo();
+    joinChordNetwork(firstNode);
+  }
+}
+
+void joinChordNetwork(const node& randomNode) {
+  initFingerTable(randomNode);
+  updateOthers();
+}
+
+void initFingerTable(const node& randomNode) {
+  int sk;
+  node succ = serverFindSucc(randomNode, info.intervals[0].start);
+  info.fTable.fingers[0] = succ;
+  info.fTable.predecessor = serverGetPred(succ);
+  serverUpdatePredecessorRequest(succ);
+  for (int i=1;i<SHA_HASH_BITS;++i){
+    if (between(info.intervals[i].start, info.me.key, info.fTable.fingers[i-1].key)){
+      info.fTable.fingers[i] = info.fTable.fingers[i-1];
+    } else {
+      info.fTable.fingers[i] = serverFindSucc(randomNode, info.intervals[i].start);
+    }
+  }
+}
+
+void updateOthers() {
+  for (int i=0;i<SHA_HASH_BITS;++i){
+    int lookFor = normalizeValue((int)info.me.key - (1<<i));
+    node p = serverFindPred(lookFor);
+    serverUpdateFingerTable(p, info.me, i);
+  }
 }
 
 uint getHash(const char* str) {
@@ -299,20 +366,196 @@ bool serverListFilesToDownloadSendFile(int sd, sharedFileInfo* sharedFile) {
   return true;
 }
 
-void serverFindSuccessor(int sd) {
+node serverFindSucc(const node& nd, uint id) {
+  int sd;
+  if (!initClient(sd, nd.address.c_str(), nd.port)){
+    return info.me;
+  }
 
+  debugMessage("I'm asking node at port %u to find the successor of id %u\n", nd.port, id);
+  
+  uint request = SRV_FIND_SUCCESSOR;
+  if (-1 == write(sd, &request, 4) || -1 == write(sd, &id, 4)){
+    printf("[server]Failed to ask a specific node to find a successor!\n");
+    close(sd);
+    return info.me;
+  }
+  node res;
+  readNodeInfo(sd, res);
+
+  close(sd);
+  return res;
+}
+
+node serverFindSucc(uint id) {
+  if (id == info.me.key){
+    debugMessage("I'm trying to find the succesor of node %u, and it is me", id);
+    return info.me;
+  }
+  node pred = serverFindPred(id);
+  if (pred == info.me){
+    debugMessage("I'm trying to find the succesor of node %u, and it is my successor", id);
+    return info.fTable.fingers[0];
+  }
+  
+  int sd;
+  if (!initClient(sd, pred.address.c_str(), pred.port)){
+    return info.me;
+  }
+  node res = serverSendSuccessorRequest(sd);
+  close(sd);
+  return res;
+}
+
+void serverFindSuccessor(int sd) {
+  uint reqId;
+  if (-1 == read(sd, &reqId, 4)){
+    printf("[server]Failed to read an id for a \"findSuccessor\" request!\n");
+    return;
+  }
+  debugMessage("Got a request: find the successor of id %d\n", reqId);
+  node succ = serverFindSucc(reqId);
+  sendNodeInfo(sd, succ);
+}
+
+node serverGetPred(const node& nd) {
+  int sd;
+  if (!initClient(sd, nd.address.c_str(), nd.port)){
+    return info.me;
+  }
+
+  debugMessage("I'm asking node %u to send me its predecessor\n", nd.key);
+
+  uint request = SRV_GET_PREDECESSOR;
+  if (-1 == write(sd, &request, 4)){
+    printf("[server]Failed to ask a specific node to send its predecessor!\n");
+    close(sd);
+    return info.me;
+  }
+  node res;
+  readNodeInfo(sd, res);
+
+  close(sd);
+  return res;
+}
+
+node serverFindPred(uint id) {
+  debugMessage("I'm trying to find the predecessor of node %u", id);
+
+  if (between(id, info.me.key+1, info.fTable.fingers[0].key)){
+    return info.me;
+  }
+  node closest = closestPrecedingFinger(id);
+  int sd;
+  if (!initClient(sd, closest.address.c_str(), closest.port)){
+    return info.me;
+  }
+
+  int request = SRV_FIND_PREDECESSOR;
+  if (-1 == write(sd, &request, 4) || -1 == write(sd, &id, 4)){
+    printf("[server]Failed to send info during a \"serverFindPred\" operation!\n");
+    close(sd);
+    return info.me;
+  }
+  node res;
+  readNodeInfo(sd, res);
+
+  close(sd);
+  return res;
 }
 
 void serverFindPredecessor(int sd) {
+  uint reqId;
+  if (-1 == read(sd, &reqId, 4)){
+    printf("[server]Failed to read an id for a \"findPredeccessor\" request!\n");
+    return;
+    
+  }
+  debugMessage("Got a request: find the predecessor of id %d\n", reqId);
+  node pred = serverFindPred(reqId);
+  sendNodeInfo(sd, pred);
+}
 
+node serverSendSuccessorRequest(int sd){
+  uint request = SRV_GET_SUCCESSOR;
+  if (-1 == write(sd, &request, 4)){
+    printf("[server]Failed to send SRV_GET_SUCCESSOR flag to a peer!\n");
+    return info.me;
+  }
+  debugMessage("I send a request to get the successor of a node\n");
+  node res;
+  readNodeInfo(sd, res);
+  return res;
 }
 
 void serverSendSuccessor(int sd) {
   sendNodeInfo(sd, info.fTable.fingers[0]);
+  debugMessage("Got a request: send my successor\n");
 }
 
 void serverSendPredecessor(int sd) {
   sendNodeInfo(sd, info.fTable.predecessor);
+  debugMessage("Got a request: send my predecessor\n");
+}
+
+void serverUpdatePredecessorRequest(const node& nd) {
+  int sd;
+  if (!initClient(sd, nd.address.c_str(), nd.port)){
+    return;
+  }
+  uint request = SRV_UPDATE_PREDECESSOR;
+  if (-1 == write(sd, &request, 4)){
+    printf("[server]Failed to ask a peer to set this server as its predecessor!\n");
+    close(sd);
+    return;
+  }
+
+  debugMessage("I'm asking node %u to set me (node %u) as its predecessor\n", nd.key, info.me.key);
+
+  sendNodeInfo(sd, info.me);
+
+  close(sd);
+}
+
+void serverUpdatePredecessor(int sd){
+  node newPred;
+  if (!readNodeInfo(sd, newPred)){
+    return;
+  }
+  debugMessage("Got a request: update my predecessor, the new one is id %u\n", newPred.key);
+  info.fTable.predecessor = newPred;
+}
+
+void serverUpdateFingerTable(int sd) {
+  node nd;
+  uint fingerIndex;
+  if (!readNodeInfo(sd, nd) || -1 == read(sd, &fingerIndex, 4)){
+    printf("[server]Failed to read protocol data for a \"serverUpdateFingerTable\" operation!\n");
+    return;
+  }
+
+  debugMessage("Got a request: node %u has me as its %u th finger", nd.key, fingerIndex);
+  
+  if (between(nd.key, info.me.key, info.fTable.fingers[fingerIndex].key-1)){
+    info.fTable.fingers[fingerIndex] = nd;
+    node p = info.fTable.predecessor;
+    if (p != nd){
+      serverUpdateFingerTable(p, nd, fingerIndex);
+    }
+  }
+}
+
+void serverUpdateFingerTable(const node& p, const node& nd, uint i) {
+  int sd;
+  if (!initClient(sd, p.address.c_str(), p.port)){
+    return;
+  }
+  debugMessage("I'm notifying node %u that node %u has him as its %u th finger", p.key, nd.key, i);
+  uint request = SRV_UPDATE_FINGERS_TABLE;
+  if (-1 == write(sd, &request, 4) || !sendNodeInfo(sd, nd) || -1 == write(sd, &i, 4)){
+    printf("Failed to notify another peer to update its fingers table!\n");
+  }
+  close(sd);
 }
 
 static void* serverLogic(void *) {
@@ -322,21 +565,22 @@ static void* serverLogic(void *) {
   int sd = createServer();
   bool running = true;
 
-  if (listen(sd, 5) == -1){
+  if (listen(sd, 20) == -1){
     perror("[server]Error when calling listen() in server!");
   }
 
-  pthread_t cv;
+  pthread_t cv[100];
+  int client[100];
+  int curr = 0;
 
   while (running){
-    int client;
     memset(&from, 0, sizeof(from));
     uint length = sizeof(from);
-    if ((client = accept (sd, (struct sockaddr *) &from, &length)) < 0){
+    if ((client[curr] = accept (sd, (struct sockaddr *) &from, &length)) < 0){
       perror ("[server]Error when calling accept()!");
       continue;
     }
-    pthread_create(&cv, NULL, treat, &client);
+    pthread_create(&cv[curr], NULL, treat, &client[curr++]);
   }
 
   return NULL;
@@ -391,9 +635,15 @@ static void* treat(void* arg) {
     case SRV_FIND_PREDECESSOR:
       serverFindPredecessor(sd);
       break;
-    case SRV_ADD_FILE:
+    case SRV_UPDATE_PREDECESSOR:
+      serverUpdatePredecessor(sd);
+      break;
+    case SRV_UPDATE_FINGERS_TABLE:
+      serverUpdateFingerTable(sd);
       break;
     // Part2Part functionalities:
+    case SRV_ADD_FILE:
+      break;
     case SRV_DOWNLOAD_FILE:
       serverDownloadFileLogic(sd);
       break;
@@ -401,11 +651,13 @@ static void* treat(void* arg) {
       serverListFilesToDownloadLogic(sd);
       break;
     default:
-      break;
+      printf("[server]This should not happen, got an invalid request ID: %d!\n", option);
+      return NULL;
   }
 
   if (-1 == close(sd)){
-    perror("[server]Error when calling close() for a client socket descriptor!");
+    std::string errorString = std::string("[server]Error when calling close() for a client socket descriptor!") + std::to_string(option);
+    perror(errorString.c_str());
     return NULL;
   }
   return NULL;
@@ -583,7 +835,8 @@ bool initClient(int& sd, const char* ipAddress, int port) {
   client.sin_addr.s_addr = inet_addr(ipAddress);
   client.sin_port = htons (port);
   if (-1 == connect (sd, (struct sockaddr *) &client,sizeof (struct sockaddr))){
-    perror("[client]Error when connecting to peer!");
+    std::string errorMsg = std::string("[client]Error when connecting to peer!") + std::string(ipAddress) + std::string(", ") + std::to_string(port);
+    perror(errorMsg.c_str());
     close(sd);
     return false;
   }
@@ -602,11 +855,11 @@ void clientLogic() {
     std::getline(std::cin,inputLine);
 
     cmd::commandResult info = parser.parse(inputLine);
-    clientRunning = executeClientCommand(info);
+    clientRunning = executeClientCommand(parser, info);
   }
 }
 
-bool executeClientCommand(cmd::commandResult& command){
+bool executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& command){
   switch (command.id){
     case cmd::commandId::ADD_FILE:
       shareFile(command);
@@ -637,7 +890,11 @@ bool executeClientCommand(cmd::commandResult& command){
     case cmd::commandId::CONFIG_AUTO_ADD:
       configFileAutoAdd(command);
       break;
+    case cmd::commandId::CHORD_NODE_INFO:
+      printThisChordNodeInfo();
+      break;
     case cmd::commandId::LISTALL:
+      std::cout<<parser;
       break;
     case cmd::commandId::CLOSE:
       return false;
@@ -688,6 +945,8 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommand(cmd::commandId::CONFIG_AUTO_ADD, "config-auto-add", "sets whether the entries from the auto-upload list have to be shared when the server starts");
   parser.addCommandOptionBoolean(cmd::commandId::CONFIG_AUTO_ADD, "-enable", false);
   parser.addCommandOptionBoolean(cmd::commandId::CONFIG_AUTO_ADD, "-disable", false);
+
+  parser.addCommand(cmd::commandId::CHORD_NODE_INFO, "chord-info", "prints info about this chord node");
 
   parser.addCommand(cmd::commandId::LISTALL, "list-cmd" ,"displays information about all the commands");
 

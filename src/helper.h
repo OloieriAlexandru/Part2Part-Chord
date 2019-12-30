@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <fstream>
 #include <string>
 #include <iostream>
@@ -13,6 +14,10 @@
 
 #include "constants.h"
 #include "command-line.h"
+
+#include "chord.h"
+
+void    debugMessage(const char* format, ...);
 
 uint    getHash(SHA1& sha1, const char* str);
 uint    getCustomHash(const char* str);

@@ -20,6 +20,7 @@ namespace cmd{
         CONFIG_REMOVE_ALL,
         CONFIG_LIST_FILES,
         CONFIG_AUTO_ADD,
+        CHORD_NODE_INFO,
         LISTALL,
         CLOSE,
         EMPTYLINE, // returned when the entered line is empty

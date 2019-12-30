@@ -11,9 +11,20 @@
 //          -
 #define     SRV_GET_PREDECESSOR             3                       // ---
 //          -
-#define     SRV_FIND_PREDECESSOR            5                       // ---
+#define     SRV_FIND_PREDECESSOR            4                       // ---
 //          uint                            - id
-#define     SRV_ADD_FILE                    4                       // ---
+#define     SRV_UPDATE_PREDECESSOR          5                       // ---
+//          uint                            - predId
+//          uint                            - predPort
+//          uint                            - predIpLen
+//          char[predIpLen]                 - predIp
+#define     SRV_UPDATE_FINGERS_TABLE        6                       // ---
+//          uint                            - nodeId
+//          uint                            - nodePort
+//          uint                            - nodeIpLen
+//          char[nodeIpLen]                 - nodeIp
+//          uint                            - fingerIndex
+#define     SRV_ADD_FILE                    7                       // ---
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
 //          uint                            - ownerPort
