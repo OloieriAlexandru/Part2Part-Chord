@@ -24,12 +24,17 @@
 //          uint                            - nodeIpLen
 //          char[nodeIpLen]                 - nodeIp
 //          uint                            - fingerIndex
-#define     SRV_ADD_FILE                    7                       // ---
+#define     SRV_UPDATE_SUCCESSOR            7                       // ---
+//          uint                            - succId
+//          uint                            - succPort
+//          uint                            - succIpLen
+//          char[succIpLen]                 - succIp
+#define     SRV_ADD_FILE                    8                       // ---
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
 //          uint                            - ownerPort
 //          uint                            - ownerAddressLen
-//          char[ownerAddressLen]          - ownerAddress     
+//          char[ownerAddressLen]           - ownerAddress     
 #define     SRV_DOWNLOAD_FILE               10                      // ---
 //          client:
 //          uint                            - fileNameLen;

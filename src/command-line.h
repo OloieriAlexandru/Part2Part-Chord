@@ -21,6 +21,8 @@ namespace cmd{
         CONFIG_LIST_FILES,
         CONFIG_AUTO_ADD,
         CHORD_NODE_INFO,
+        CHORD_SUCC,
+        CHORD_PRED,
         LISTALL,
         CLOSE,
         EMPTYLINE, // returned when the entered line is empty

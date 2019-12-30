@@ -24,6 +24,10 @@ std::string cmd::commandEnumToString(cmd::commandId cmdId){
             return "config-auto-add";
         case cmd::commandId::CHORD_NODE_INFO:
             return "chord-info";
+        case cmd::commandId::CHORD_SUCC:
+            return "chord-succ";
+        case cmd::commandId::CHORD_PRED:
+            return "chord-pred";
         case cmd::commandId::LISTALL:
             return "list";
         case cmd::commandId::CLOSE:

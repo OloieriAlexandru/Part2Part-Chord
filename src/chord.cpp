@@ -19,7 +19,8 @@ void printThisChordNodeInfo() {
     printf("Predecessor: %u %u %s\n", info.fTable.predecessor.key, info.fTable.predecessor.port, info.fTable.predecessor.address.c_str());
     printf("Fingers table:\n");
     for (int i=0;i<SHA_HASH_BITS;++i){
-        printf("%d. %u %u %s\n", i+1, info.fTable.fingers[i].key, info.fTable.fingers[i].port, info.fTable.fingers[i].address.c_str());
+        printf("%d. %u %u %s [%d, %d)\n", i+1, info.fTable.fingers[i].key, info.fTable.fingers[i].port, info.fTable.fingers[i].address.c_str(),
+            info.intervals[i].start, info.intervals[i].end+1);
     }
 }
 
@@ -67,7 +68,7 @@ node closestPrecedingFinger(uint id){
     }
 
     for (int i=SHA_HASH_BITS-1;i>0;--i){
-        if (between(info.fTable.fingers[i].key, info.me.key, id)){
+        if (between(info.fTable.fingers[i].key, info.me.key+1, id-1)){
             return info.fTable.fingers[i];
         }
     }

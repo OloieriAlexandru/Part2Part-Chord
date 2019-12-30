@@ -59,6 +59,8 @@ void          serverFindPredecessor(int sd);
 node          serverSendSuccessorRequest(int sd);
 void          serverSendSuccessor(int sd);
 void          serverSendPredecessor(int sd);
+void          serverUpdateSuccessorRequest(const node& nd);
+void          serverUpdateSuccessor(int sd);
 void          serverUpdatePredecessorRequest(const node& nd);
 void          serverUpdatePredecessor(int sd);
 void          serverUpdateFingerTable(int sd);
@@ -75,6 +77,10 @@ static void*  treat(void *);
 void          clientDownloadFileLogic(const cmd::commandResult& command);
 void          clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId);
 void          clientListFilesToDownloadLogic(const cmd::commandResult& command);
+
+bool          checkId(int id);
+void          printChordSucc(const cmd::commandResult& command);
+void          printChordPred(const cmd::commandResult& command);
 
 bool          initClient(int& sd, const char* ipAddress, int port);
 void          clientLogic();
@@ -172,6 +178,7 @@ void initFingerTable(const node& randomNode) {
   info.fTable.fingers[0] = succ;
   info.fTable.predecessor = serverGetPred(succ);
   serverUpdatePredecessorRequest(succ);
+  serverUpdateSuccessorRequest(info.fTable.predecessor);
   for (int i=1;i<SHA_HASH_BITS;++i){
     if (between(info.intervals[i].start, info.me.key, info.fTable.fingers[i-1].key)){
       info.fTable.fingers[i] = info.fTable.fingers[i-1];
@@ -184,8 +191,10 @@ void initFingerTable(const node& randomNode) {
 void updateOthers() {
   for (int i=0;i<SHA_HASH_BITS;++i){
     int lookFor = normalizeValue((int)info.me.key - (1<<i));
-    node p = serverFindPred(lookFor);
-    serverUpdateFingerTable(p, info.me, i);
+    node p = serverFindPred(lookFor);    
+    if (p != info.me){
+      serverUpdateFingerTable(p, info.me, i);
+    }
   }
 }
 
@@ -413,8 +422,8 @@ void serverFindSuccessor(int sd) {
     printf("[server]Failed to read an id for a \"findSuccessor\" request!\n");
     return;
   }
-  debugMessage("Got a request: find the successor of id %d\n", reqId);
   node succ = serverFindSucc(reqId);
+  debugMessage("Got a request: find the successor of id %d, found: %d\n", reqId, succ.key);
   sendNodeInfo(sd, succ);
 }
 
@@ -440,12 +449,17 @@ node serverGetPred(const node& nd) {
 }
 
 node serverFindPred(uint id) {
-  debugMessage("I'm trying to find the predecessor of node %u", id);
-
   if (between(id, info.me.key+1, info.fTable.fingers[0].key)){
+    debugMessage("I'm trying to find the predecessor of node %u, and it's me\n", id);
     return info.me;
   }
   node closest = closestPrecedingFinger(id);
+  if (closest == info.me){    
+    debugMessage("I'm trying to find the predecessor of node %u, and here?\n", id);
+    printThisChordNodeInfo();
+    return info.me;
+  }
+
   int sd;
   if (!initClient(sd, closest.address.c_str(), closest.port)){
     return info.me;
@@ -490,12 +504,39 @@ node serverSendSuccessorRequest(int sd){
 
 void serverSendSuccessor(int sd) {
   sendNodeInfo(sd, info.fTable.fingers[0]);
-  debugMessage("Got a request: send my successor\n");
+  debugMessage("Got a request: send my successor, sent: %d\n", info.fTable.fingers[0].key);
 }
 
 void serverSendPredecessor(int sd) {
   sendNodeInfo(sd, info.fTable.predecessor);
   debugMessage("Got a request: send my predecessor\n");
+}
+
+void serverUpdateSuccessorRequest(const node& nd) {
+  int sd;
+  if (!initClient(sd, nd.address.c_str(), nd.port)){
+    return;
+  }
+  uint request = SRV_UPDATE_SUCCESSOR;
+  if (-1 == write(sd, &request, 4)){
+    printf("[server]Failed to ask a peer to set this server as its successor!\n");
+    close(sd);
+    return;
+  }
+
+  debugMessage("I'm asking node %u to set me (node %u) as its successor\n", nd.key, info.me.key);
+
+  sendNodeInfo(sd, info.me);
+  close(sd);
+}
+
+void serverUpdateSuccessor(int sd) {
+  node newSucc;
+  if (!readNodeInfo(sd, newSucc)){
+    return;
+  }
+  debugMessage("Got a request: update my successor, the new one is id %u\n", newSucc.key);
+  info.fTable.fingers[0] = newSucc;
 }
 
 void serverUpdatePredecessorRequest(const node& nd) {
@@ -513,7 +554,6 @@ void serverUpdatePredecessorRequest(const node& nd) {
   debugMessage("I'm asking node %u to set me (node %u) as its predecessor\n", nd.key, info.me.key);
 
   sendNodeInfo(sd, info.me);
-
   close(sd);
 }
 
@@ -534,7 +574,7 @@ void serverUpdateFingerTable(int sd) {
     return;
   }
 
-  debugMessage("Got a request: node %u has me as its %u th finger", nd.key, fingerIndex);
+  debugMessage("Got a request: node %u has me as its %u th finger\n", nd.key, fingerIndex);
   
   if (between(nd.key, info.me.key, info.fTable.fingers[fingerIndex].key-1)){
     info.fTable.fingers[fingerIndex] = nd;
@@ -550,7 +590,7 @@ void serverUpdateFingerTable(const node& p, const node& nd, uint i) {
   if (!initClient(sd, p.address.c_str(), p.port)){
     return;
   }
-  debugMessage("I'm notifying node %u that node %u has him as its %u th finger", p.key, nd.key, i);
+  debugMessage("I'm notifying node %u that node %u has him as its %u th finger\n", p.key, nd.key, i);
   uint request = SRV_UPDATE_FINGERS_TABLE;
   if (-1 == write(sd, &request, 4) || !sendNodeInfo(sd, nd) || -1 == write(sd, &i, 4)){
     printf("Failed to notify another peer to update its fingers table!\n");
@@ -637,6 +677,9 @@ static void* treat(void* arg) {
       break;
     case SRV_UPDATE_PREDECESSOR:
       serverUpdatePredecessor(sd);
+      break;
+    case SRV_UPDATE_SUCCESSOR:
+      serverUpdateSuccessor(sd);
       break;
     case SRV_UPDATE_FINGERS_TABLE:
       serverUpdateFingerTable(sd);
@@ -825,6 +868,22 @@ void clientListFilesToDownloadLogic(const cmd::commandResult& command) {
   close(sd);
 }
 
+bool checkId(int id){
+  return id >= 0 && id <= SHA_HASH_MOD;
+}
+
+void printChordSucc(const cmd::commandResult& command) {
+  int id = command.getNumberOptionValue("-id");
+  node res = serverFindSucc(id);
+  std::cout<<res<<'\n';
+}
+
+void printChordPred(const cmd::commandResult& command) {
+  int id = command.getNumberOptionValue("-id");
+  node res = serverFindPred(id);
+  std::cout<<res<<'\n';
+}
+
 bool initClient(int& sd, const char* ipAddress, int port) {
   struct sockaddr_in client;
   if (-1 == (sd = socket(AF_INET, SOCK_STREAM, 0))){
@@ -893,6 +952,12 @@ bool executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& 
     case cmd::commandId::CHORD_NODE_INFO:
       printThisChordNodeInfo();
       break;
+    case cmd::commandId::CHORD_SUCC:
+      printChordSucc(command);
+      break;
+    case cmd::commandId::CHORD_PRED:
+      printChordPred(command);
+      break;
     case cmd::commandId::LISTALL:
       std::cout<<parser;
       break;
@@ -947,6 +1012,12 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommandOptionBoolean(cmd::commandId::CONFIG_AUTO_ADD, "-disable", false);
 
   parser.addCommand(cmd::commandId::CHORD_NODE_INFO, "chord-info", "prints info about this chord node");
+
+  parser.addCommand(cmd::commandId::CHORD_SUCC, "chord-succ", "prints successor(id) in the Chord network");
+  parser.addCommandOptionNumber(cmd::commandId::CHORD_SUCC, "-id", -1);
+  
+  parser.addCommand(cmd::commandId::CHORD_PRED, "chord-pred", "prints predecessor(id) in the Chord network");
+  parser.addCommandOptionNumber(cmd::commandId::CHORD_PRED, "-id", -1);
 
   parser.addCommand(cmd::commandId::LISTALL, "list-cmd" ,"displays information about all the commands");
 
