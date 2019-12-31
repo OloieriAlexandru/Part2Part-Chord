@@ -4,6 +4,8 @@
 #include <unistd.h>
 
 #include <string>
+#include <vector>
+#include <algorithm>
 #include <ostream>
 
 #include "constants.h"
@@ -39,6 +41,8 @@ struct nodeInfo {
 };
 
 extern nodeInfo info;
+extern node     serverFindSucc(uint id);
+extern node     serverFindPred(uint id);
 
 struct sharedFileInfo {
     std::string name;
@@ -64,5 +68,11 @@ bool    sendNodeInfo(int sd, const uint key, const uint port, const std::string&
 bool    sendNodeInfo(int sd, const node& nd);
 bool    readNodeInfo(int sd, uint& key, uint& port, std::string& address);
 bool    readNodeInfo(int sd, node& nd);
+
+bool    getNodesInClockwiseOrder(std::vector<int>& clock);
+void    printNodesInClockwiseOrder();
+bool    getNodesInCounterClockwiseOrder(std::vector<int>& cclock);
+void    printNodesInCounterClockwiseOrder();
+void    checkSuccPredPointers();
 
 #endif // CHORD_H

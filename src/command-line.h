@@ -23,6 +23,9 @@ namespace cmd{
         CHORD_NODE_INFO,
         CHORD_SUCC,
         CHORD_PRED,
+        CHORD_CLOCKWISE,
+        CHORD_CCLOCKWISE,
+        CHORD_CHECK,
         LISTALL,
         CLOSE,
         EMPTYLINE, // returned when the entered line is empty

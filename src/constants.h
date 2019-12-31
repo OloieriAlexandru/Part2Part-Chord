@@ -3,7 +3,10 @@
 
 #define DEBUG           0
 
-#define SHA_HASH_BITS   20
+#define THREADS_COUNT   120
+#define THREAD_EXIT     -123456
+
+#define SHA_HASH_BITS   10
 #define SHA_HASH_VAL    (1u << SHA_HASH_BITS)
 #define SHA_HASH_MOD    (1u << SHA_HASH_BITS) - 1
 

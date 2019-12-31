@@ -29,7 +29,12 @@
 //          uint                            - succPort
 //          uint                            - succIpLen
 //          char[succIpLen]                 - succIp
-#define     SRV_ADD_FILE                    8                       // ---
+#define     SRV_STABILIZATION               8
+//          uint                            - nodeId
+//          uint                            - nodePort
+//          uint                            - nodeIpLen
+//          char[nodeIpLen]                 - nodeIp
+#define     SRV_ADD_FILE                    9                       // ---
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
 //          uint                            - ownerPort

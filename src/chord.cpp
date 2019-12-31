@@ -116,3 +116,74 @@ bool readNodeInfo(int sd, uint& key, uint& port, std::string& address) {
 bool readNodeInfo(int sd, node& nd) {
     return readNodeInfo(sd, nd.key, nd.port, nd.address);
 }
+
+bool getNodesInClockwiseOrder(std::vector<int>& clock) {
+    clock.clear();
+    int mine = info.me.key, currId = mine + 1, steps = 1;
+    clock.push_back(mine);
+    node currentNode = serverFindSucc(currId);
+    while (currentNode.key != mine && steps < SHA_HASH_VAL){
+        clock.push_back(currentNode.key);
+        currId = currentNode.key + 1;
+        currentNode = serverFindSucc(currId);
+        ++steps;
+    }
+    if (steps == SHA_HASH_VAL){
+        return false;
+    }
+    return true;
+}
+
+void printNodesInClockwiseOrder() {
+    std::vector<int> clock;
+    if (!getNodesInClockwiseOrder(clock)){
+        return;
+    }
+    printf("Chord nodes: ");
+    for (int i=0;i<clock.size();++i){
+        printf("%d ", clock[i]);
+    }
+    printf("\n");
+}
+
+bool getNodesInCounterClockwiseOrder(std::vector<int>& cclock) {
+    cclock.clear();
+    int mine = info.me.key, currId = mine, steps = 1;
+    cclock.push_back(mine);
+    node currentNode = serverFindPred(currId);
+    while (currentNode.key != mine && steps < SHA_HASH_VAL){
+        cclock.push_back(currentNode.key);
+        currId = currentNode.key;
+        currentNode = serverFindPred(currId);
+        ++steps;
+    }
+    if (steps == SHA_HASH_VAL){
+        return false;
+    }
+    return true;
+}
+
+void printNodesInCounterClockwiseOrder() {
+    std::vector<int> cclock;
+    if (!getNodesInCounterClockwiseOrder(cclock)){
+        return;
+    }
+    printf("Chord nodes: ");
+    for (int i=0;i<cclock.size();++i){
+        printf("%d ", cclock[i]);
+    }
+    printf("\n");
+}
+
+void checkSuccPredPointers() {
+    std::vector<int> clock, cclock;
+    if (!getNodesInClockwiseOrder(clock) || !getNodesInCounterClockwiseOrder(cclock)){
+        return;
+    }
+    std::reverse(cclock.begin()+1, cclock.end());
+    if (clock == cclock){
+        printf("Success! All successor and predecessor fields are correct in the network!\n");
+    } else {
+        printf("Error! Not all successor and predecessor fields are correct in the network!\n");
+    }
+}

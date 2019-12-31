@@ -17,6 +17,11 @@
 
 #include "chord.h"
 
+struct  threadInfo {
+    int sd;
+    int threadNo;
+};
+
 void    debugMessage(const char* format, ...);
 
 uint    getHash(SHA1& sha1, const char* str);

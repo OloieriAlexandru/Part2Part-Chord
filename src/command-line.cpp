@@ -28,6 +28,12 @@ std::string cmd::commandEnumToString(cmd::commandId cmdId){
             return "chord-succ";
         case cmd::commandId::CHORD_PRED:
             return "chord-pred";
+        case cmd::commandId::CHORD_CLOCKWISE:
+            return "chord-clock";
+        case cmd::commandId::CHORD_CCLOCKWISE:
+            return "chord-cclock";
+        case cmd::commandId::CHORD_CHECK:
+            return "chord-check";
         case cmd::commandId::LISTALL:
             return "list";
         case cmd::commandId::CLOSE:

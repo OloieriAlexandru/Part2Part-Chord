@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <pthread.h>
+#include <time.h>
 
 #include <unordered_map>
 #include <iostream>
@@ -66,7 +67,17 @@ void          serverUpdatePredecessor(int sd);
 void          serverUpdateFingerTable(int sd);
 void          serverUpdateFingerTable(const node& p, const node& nd, uint i);
 
+void          serverChordStabilization(int sd);
+void          chordStabilizationNotify(const node& nd);
+void          chordStabilize();
+void          chordFixFingers();
+
+static void*  chordStabilization(void *);
 static void*  serverLogic(void *);
+
+pthread_t     serverThreads[THREADS_COUNT];
+threadInfo    serverClients[THREADS_COUNT];
+
 int           createServer();
 
 bool          executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& command);
@@ -95,7 +106,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  pthread_t serverThread;
+  pthread_t serverThread, stabilizationThread;
   if (pthread_create(&serverThread, NULL, serverLogic, NULL)){
     perror("[main]Error when creating main thread for the server!");
     return 1;
@@ -103,6 +114,11 @@ int main(int argc, char* argv[]) {
 
   shareFilesFromConfigFile();
   joinChordNetwork();
+
+  if (pthread_create(&stabilizationThread, NULL, chordStabilization, NULL)){
+    perror("[main]Error when creating a thread for the stabilization operations!");
+    return 1;
+  }
 
   clientLogic();
   return 0;
@@ -575,8 +591,8 @@ void serverUpdateFingerTable(int sd) {
   }
 
   debugMessage("Got a request: node %u has me as its %u th finger\n", nd.key, fingerIndex);
-  
-  if (between(nd.key, info.me.key, info.fTable.fingers[fingerIndex].key-1)){
+
+  if (between(nd.key, info.me.key, (int)info.fTable.fingers[fingerIndex].key-1)){
     info.fTable.fingers[fingerIndex] = nd;
     node p = info.fTable.predecessor;
     if (p != nd){
@@ -598,29 +614,93 @@ void serverUpdateFingerTable(const node& p, const node& nd, uint i) {
   close(sd);
 }
 
+void serverChordStabilization(int sd) {
+  node np;
+  debugMessage("A node sent me a stabilization flag, I'm reading info about that node!\n");
+  if (!readNodeInfo(sd, np)){
+    return;
+  }
+  if (between(np.key, info.fTable.predecessor.key+1, (int)info.me.key-1)){
+    info.fTable.predecessor = np;
+  }
+}
+
+void chordStabilizationNotify(const node& nd){
+  int sd;
+  if (!initClient(sd, nd.address.c_str(), nd.port)){
+    return;
+  }
+  uint request = SRV_STABILIZATION;
+  if (-1 == write(sd, &request, 4)){
+    printf("Failed to send stabilization flag to a peer!\n");
+    close(sd);
+    return;
+  }
+
+  debugMessage("I'm sending a stabilization message to my successor, node %d\n", nd.key);
+
+  sendNodeInfo(sd, nd);
+  close(sd);
+}
+
+void chordStabilize() {
+  node succPred = serverGetPred(info.fTable.fingers[0]);
+  if (between(succPred.key, info.me.key+1, (int)info.fTable.fingers[0].key-1)){
+    info.fTable.fingers[0] = succPred;
+  }
+  chordStabilizationNotify(info.fTable.fingers[0]);
+}
+
+void chordFixFingers() {
+  int finger = (rand() % (SHA_HASH_BITS - 1)) + 1;
+  info.fTable.fingers[finger] = serverFindSucc(info.intervals[finger].start);
+}
+
+static void* chordStabilization(void *) {
+  srand(time(NULL));
+  while (true){
+    usleep(500000);
+    chordStabilize();
+    chordFixFingers();
+  }
+}
+
 static void* serverLogic(void *) {
 	pthread_detach(pthread_self());
 
   struct sockaddr_in from;
-  int sd = createServer();
+  int sd = createServer(), currentThreadIndex, client;
   bool running = true;
 
   if (listen(sd, 20) == -1){
     perror("[server]Error when calling listen() in server!");
   }
 
-  pthread_t cv[100];
-  int client[100];
-  int curr = 0;
+  for (int i=0;i<THREADS_COUNT;++i){
+    serverClients[i].sd = THREAD_EXIT;
+    serverClients[i].threadNo = i;
+  }
 
   while (running){
     memset(&from, 0, sizeof(from));
     uint length = sizeof(from);
-    if ((client[curr] = accept (sd, (struct sockaddr *) &from, &length)) < 0){
+    if ((client = accept (sd, (struct sockaddr *) &from, &length)) < 0){
       perror ("[server]Error when calling accept()!");
       continue;
     }
-    pthread_create(&cv[curr], NULL, treat, &client[curr++]);
+    currentThreadIndex = -1;
+    for (int i=0;i<THREADS_COUNT;++i){
+      if (serverClients[i].sd == THREAD_EXIT){
+        currentThreadIndex = i;
+        break;
+      }
+    }
+    if (currentThreadIndex != -1){
+      serverClients[currentThreadIndex].sd = client;
+      pthread_create(&serverThreads[currentThreadIndex], NULL, treat, &serverClients[currentThreadIndex]);
+    } else {
+      printf("Error! Could not find a free thread!\n");
+    }
   }
 
   return NULL;
@@ -655,8 +735,10 @@ static void* treat(void* arg) {
     return NULL;
   }
   
-  int sd = *((int*)arg), option;
+  threadInfo* thisThreadInfo = (threadInfo*)arg;
+  int sd = thisThreadInfo->sd, option;
   if (-1 == read(sd, &option, 4)) {
+    serverClients[thisThreadInfo->threadNo].sd = THREAD_EXIT;
     perror("[server]Internal error! Error when reading the option number!");
     return NULL;
   }
@@ -684,6 +766,9 @@ static void* treat(void* arg) {
     case SRV_UPDATE_FINGERS_TABLE:
       serverUpdateFingerTable(sd);
       break;
+    case SRV_STABILIZATION:
+      serverChordStabilization(sd);
+      break;
     // Part2Part functionalities:
     case SRV_ADD_FILE:
       break;
@@ -694,6 +779,7 @@ static void* treat(void* arg) {
       serverListFilesToDownloadLogic(sd);
       break;
     default:
+      serverClients[thisThreadInfo->threadNo].sd = THREAD_EXIT;
       printf("[server]This should not happen, got an invalid request ID: %d!\n", option);
       return NULL;
   }
@@ -701,8 +787,10 @@ static void* treat(void* arg) {
   if (-1 == close(sd)){
     std::string errorString = std::string("[server]Error when calling close() for a client socket descriptor!") + std::to_string(option);
     perror(errorString.c_str());
+    serverClients[thisThreadInfo->threadNo].sd = THREAD_EXIT;
     return NULL;
   }
+  serverClients[thisThreadInfo->threadNo].sd = THREAD_EXIT;
   return NULL;
 };
 
@@ -958,6 +1046,15 @@ bool executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& 
     case cmd::commandId::CHORD_PRED:
       printChordPred(command);
       break;
+    case cmd::commandId::CHORD_CLOCKWISE:
+      printNodesInClockwiseOrder();
+      break;
+    case cmd::commandId::CHORD_CCLOCKWISE:
+      printNodesInCounterClockwiseOrder();
+      break;
+    case cmd::commandId::CHORD_CHECK:
+      checkSuccPredPointers();
+      break;
     case cmd::commandId::LISTALL:
       std::cout<<parser;
       break;
@@ -1018,6 +1115,10 @@ void initCmd(cmd::commandParser& parser){
   
   parser.addCommand(cmd::commandId::CHORD_PRED, "chord-pred", "prints predecessor(id) in the Chord network");
   parser.addCommandOptionNumber(cmd::commandId::CHORD_PRED, "-id", -1);
+
+  parser.addCommand(cmd::commandId::CHORD_CLOCKWISE, "chord-clock", "prints the nodes in the Chord network in clockwise order");
+  parser.addCommand(cmd::commandId::CHORD_CCLOCKWISE, "chord-cclock", "prints the nodes in the Chord network in counter-clockwise order");
+  parser.addCommand(cmd::commandId::CHORD_CHECK, "chord-check", "checks if successor and predecessor pointers are correct for all the nodes in the network");
 
   parser.addCommand(cmd::commandId::LISTALL, "list-cmd" ,"displays information about all the commands");
 
