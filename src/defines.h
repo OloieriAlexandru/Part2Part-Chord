@@ -35,11 +35,16 @@
 //          uint                            - nodeIpLen
 //          char[nodeIpLen]                 - nodeIp
 #define     SRV_ADD_FILE                    9                       // ---
+//          client:
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
-//          uint                            - ownerPort
+//          uint                            - fileId
 //          uint                            - ownerAddressLen
-//          char[ownerAddressLen]           - ownerAddress     
+//          char[ownerAddressLen]           - ownerAddress
+//          uint                            - ownerPort
+//          server:
+#define     SRV_ADD_FILE_ALREADY_EXISTS     98
+#define     SRV_ADD_FILE_OK_ADDED           99
 #define     SRV_DOWNLOAD_FILE               10                      // ---
 //          client:
 //          uint                            - fileNameLen;
@@ -68,5 +73,16 @@
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
 //          uint                            - fileId (needed when you download a file)
+#define     SRV_SEARCH_FILE                 12
+//          client:
+//          uint                            - fileNameLen
+//          char[fileNameLen]               - fileName
+//          server:
+//          uint                            - numberOfFiles
+//          numberOfFiles times:
+//          uint                            - fileId
+//          uint                            - fileOwnerIpLen
+//          char[fileIpLen]                 - fileOwnerIp
+//          uint                            - fileOwnerPort
 
 #endif // DEFINES_H

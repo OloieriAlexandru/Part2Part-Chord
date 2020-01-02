@@ -21,6 +21,7 @@ namespace cmd{
         CONFIG_LIST_FILES,
         CONFIG_AUTO_ADD,
         CHORD_NODE_INFO,
+        CHORD_LIST,
         CHORD_SUCC,
         CHORD_PRED,
         CHORD_CLOCKWISE,

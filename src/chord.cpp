@@ -13,6 +13,24 @@ std::ostream& operator<<(std::ostream& out, const node& nd){
     return out;
 }
 
+std::ostream& operator<<(std::ostream& out, const sharedFileInfo& file){
+    out<<"Name: "<<file.name<<", path: "<<file.path<<", SHA1: "<<file.shaHash<<", b131: "<<file.customHash;
+    return out;
+}
+
+bool operator ==(const chordFileInfo& f1, const chordFileInfo& f2) {
+    return (f1.id == f2.id && f1.port == f2.port && f1.address == f2.address && f1.name == f2.name);    
+}
+
+bool operator !=(const chordFileInfo& f1, const chordFileInfo& f2) {
+    return !(f1 == f2);
+}
+
+std::ostream& operator<<(std::ostream& out, const chordFileInfo& file) {
+    out << "Name: " << file.name << ", chordId: " << file.chordId  << ", id: " << file.id << ", ownerAddress: " << file.address << ", ownerPort: " << file.port;
+    return out;
+}
+
 void printThisChordNodeInfo() {
     printf("Chord node %u\n", info.me.key);
     printf("Successor: %u %u %s\n", info.fTable.fingers[0].key, info.fTable.fingers[0].port, info.fTable.fingers[0].address.c_str());
@@ -21,6 +39,18 @@ void printThisChordNodeInfo() {
     for (int i=0;i<SHA_HASH_BITS;++i){
         printf("%d. %u %u %s [%d, %d)\n", i+1, info.fTable.fingers[i].key, info.fTable.fingers[i].port, info.fTable.fingers[i].address.c_str(),
             info.intervals[i].start, info.intervals[i].end+1);
+    }
+}
+
+void printThisChordNodeFiles() {
+    int index = 1;
+    for (auto& bucket : chordFiles){
+        for (auto& file : bucket.second){
+            std::cout<<(index++)<<". "<<file<<'\n';
+        }
+    }
+    if (index == 1){
+        printf("This node isn't responsible for any files!\n");
     }
 }
 
@@ -115,6 +145,64 @@ bool readNodeInfo(int sd, uint& key, uint& port, std::string& address) {
 
 bool readNodeInfo(int sd, node& nd) {
     return readNodeInfo(sd, nd.key, nd.port, nd.address);
+}
+
+bool sendChordFileInfo(int sd, const std::string& fileName, const uint chordFileId, const uint fileId, const std::string& ownerAddress, const uint ownerPort) {
+    uint len = fileName.size();
+    if (-1 == write(sd,&len,4) || -1 == write(sd,fileName.c_str(),len) || -1 == write(sd,&chordFileId,4) || -1 == write(sd,&fileId,4)) {
+        printf("[server]Error when sending info about a shared file to a peer!\n");
+        return false;
+    }
+    len = ownerAddress.size();
+    if (-1 == write(sd,&len,4) || -1 == write(sd,ownerAddress.c_str(),len) || -1 == write(sd,&ownerPort,4)) {
+        printf("[server]Error when sending info about the owner of a shared file to a peer!\n");
+        return false;
+    }
+    return true;
+}
+
+bool sendChordFileInfo(int sd, const sharedFileInfo& file) {
+    return sendChordFileInfo(sd, file.name, file.shaHash, file.customHash, info.me.address, info.me.port);
+}
+
+bool readChordFileInfo(int sd, std::string& fileName, uint& chordFileId, uint& fileId, std::string& ownerAddress, uint& ownerPort) {
+    uint len;
+    if (-1 == read(sd,&len,4)){
+        printf("[server]Error when reading the length of the name of a shared file!\n");
+        return false;
+    }
+    fileName.resize(len);
+    for (int i=0;i<len;++i){
+        if (-1 == read(sd,&fileName[i],1)){
+            printf("[server]Error when reading the %d th byte of the name of a shared file!\n",i);
+            return false;
+        }
+    }
+    if (-1 == read(sd,&chordFileId,4) || -1 == read(sd,&fileId,4)){
+        printf("[server]Error when reading the ids of a shared file!\n");
+        return false;
+    }
+    len = ownerAddress.size();
+    if (-1 == read(sd,&len,4)){
+        printf("[server]Error when reading the length of the address of a peer that shared a file!\n");
+        return false;
+    }
+    ownerAddress.resize(len);
+    for (int i=0;i<len;++i){
+        if (-1 == read(sd,&ownerAddress[i],1)){
+            printf("[server]Error when reading the %d th byte of the address of a peer that shared a file!\n",i);
+            return false;
+        }
+    }
+    if (-1 == read(sd,&ownerPort,4)){
+        printf("[server]Error when reading the port of a peer that shared a file!\n");
+        return false;
+    }
+    return true;
+}
+
+bool readChordFileInfo(int sd, chordFileInfo& fileInfo) {
+    return readChordFileInfo(sd, fileInfo.name, fileInfo.chordId, fileInfo.id, fileInfo.address, fileInfo.port);
 }
 
 bool getNodesInClockwiseOrder(std::vector<int>& clock) {

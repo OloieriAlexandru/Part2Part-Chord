@@ -23,15 +23,17 @@
 
 #define umap std::unordered_map
 
-extern int errno;
+extern int                                      errno;
 
-node    getFirstNodeInfo();
-bool    isFirstChordNode(const std::string& address, uint port);
-bool    check(int argc, char* argv[]);
-void    shareFilesFromConfigFile();
+node          getFirstNodeInfo();
+bool          isFirstChordNode(const std::string& address, uint port);
+bool          check(int argc, char* argv[]);
+void          shareFilesFromConfigFile();
 
 nodeInfo                                        info;
 umap<std::string,std::vector<sharedFileInfo>>   sharedFiles;
+
+umap<std::string,std::vector<chordFileInfo>>    chordFiles;
 
 void          joinChordNetwork();
 void          joinChordNetwork(const node& randomNode);
@@ -41,15 +43,19 @@ void          updateOthers();
 SHA1          sha1;
 uint          getHash(const char* str);
 
+uint          addFileToNetworkToPeer(const node& nd, const sharedFileInfo& file);
+bool          addFileToNetwork(const sharedFileInfo& file);
 void          shareFile(const std::string& name, const std::string& path, bool atInit = false);
-void          shareFile(const cmd::commandResult& command);
 void          listSharedFiles();
 
 void          serverSendErrorFlag(int sd);
+uint          serverAddSharedFileLogic(const chordFileInfo& newFile);
+void          serverAddSharedFile(int sd);
 void          serverDownloadFileLogic(int sd);
 void          serverDownloadFileUpload(int sd, sharedFileInfo* sharedFile);
 void          serverListFilesToDownloadLogic(int sd);
 bool          serverListFilesToDownloadSendFile(int sd, sharedFileInfo* sharedFile);
+void          serverSearchFiles(int sd);
 
 node          serverFindSucc(const node& nd, uint id);
 node          serverFindSucc(uint id);
@@ -85,6 +91,9 @@ void          initCmd(cmd::commandParser& parser);
 
 static void*  treat(void *);
 
+void          clientAddFileLogic(const cmd::commandResult& command);
+void          clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileName);
+void          clientSearchFileLogic(const cmd::commandResult& command);
 void          clientDownloadFileLogic(const cmd::commandResult& command);
 void          clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId);
 void          clientListFilesToDownloadLogic(const cmd::commandResult& command);
@@ -218,6 +227,55 @@ uint getHash(const char* str) {
   return getHash(sha1, str);
 }
 
+uint addFileToNetworkToPeer(const node& nd, const sharedFileInfo& file) {
+  uint response;
+  if (info.me == nd){
+    chordFileInfo newFile(file.name, file.shaHash, file.customHash, nd.address, nd.port);
+    response = serverAddSharedFileLogic(newFile);
+  } else {
+    int sd;
+    if (!initClient(sd, nd.address.c_str(), nd.port)){
+      return SRV_ERROR;
+    }
+    uint request = SRV_ADD_FILE;
+    if (-1 == write(sd,&request,4)){
+      close(sd);
+      printf("[!!!]Failed to send protocol data to peer!\n");
+      return SRV_ERROR;
+    }
+    if (!sendChordFileInfo(sd, file)){
+      close(sd);
+      return SRV_ERROR;
+    }
+    if (-1 == read(sd,&response,4)){
+      close(sd);
+      printf("[!!!]Failed to read the server response for a \"addFileToNetwork\" operation!\n");
+      return SRV_ERROR;
+    }
+    close(sd);
+  }
+  if (response == SRV_ADD_FILE_ALREADY_EXISTS){
+    printf("The server claims that the file already exists!\n");
+  } 
+  return response;
+}
+
+bool addFileToNetwork(const sharedFileInfo& file){
+  node responsibleNode;
+  if (file.shaHash == info.me.key){
+    responsibleNode = info.me;
+  } else {
+    responsibleNode = serverFindSucc(file.shaHash);
+  }
+  uint response = addFileToNetworkToPeer(responsibleNode, file);
+  if (response == SRV_ADD_FILE_OK_ADDED){
+    std::cout<<"File added successfully at node: "<<responsibleNode<<'\n';
+  } else if (response == SRV_ERROR) {
+    std::cout<<"Server error!\n";
+  }
+  return response == (SRV_ADD_FILE_OK_ADDED);
+}
+
 void shareFile(const std::string& name, const std::string& path, bool atInit) {
   if (!fileExists(path.c_str())) {
     if (!atInit){
@@ -227,17 +285,10 @@ void shareFile(const std::string& name, const std::string& path, bool atInit) {
     }
     return;
   }
-  sharedFiles[name].push_back(sharedFileInfo(name, path, getCustomHash(path.c_str())));
-}
-
-void shareFile(const cmd::commandResult& command) {
-  std::string fileName = command.getStringOptionValue("-name");
-  std::string filePath = command.getStringOptionValue("-path");
-  if (fileName == "none" || filePath == "none"){
-      printf("You have to specify the name and the path of the file! (-name and -path options)\n");
-      return;
+  sharedFileInfo newFile(sharedFileInfo(name, path, getCustomHash(path.c_str()), getHash(name.c_str())));
+  if (addFileToNetwork(newFile)){
+      sharedFiles[name].push_back(newFile);
   }
-  shareFile(fileName, filePath);
 }
 
 void listSharedFiles() {
@@ -254,6 +305,32 @@ void serverSendErrorFlag(int sd){
   uint response = SRV_ERROR;
   if (-1 == write(sd, &response, 4)){
     printf("[server]Failed to send the error flag to the client!\n");
+  }
+}
+
+uint serverAddSharedFileLogic(const chordFileInfo& newFile){
+  bool found = false;
+  for (auto file : chordFiles[newFile.name]){
+    if (file == newFile){
+      found = true;
+      break;
+    }
+  }
+  if (found){
+    return SRV_ADD_FILE_ALREADY_EXISTS;
+  } 
+  chordFiles[newFile.name].push_back(newFile);
+  return SRV_ADD_FILE_OK_ADDED;
+}
+
+void serverAddSharedFile(int sd) {
+  chordFileInfo newFile;
+  if (!readChordFileInfo(sd, newFile)){
+    return;
+  }
+  uint response = serverAddSharedFileLogic(newFile);
+  if (-1 == write(sd,&response,4)) {
+    printf("[server]Errow when sending the response back to the client (\"serverAddSharedFile\")!\n");
   }
 }
 
@@ -389,6 +466,38 @@ bool serverListFilesToDownloadSendFile(int sd, sharedFileInfo* sharedFile) {
       return false;
     }
   return true;
+}
+
+void serverSearchFiles(int sd) { 
+  uint fileNameLen;
+  std::string fileName;
+  if (-1 == read(sd,&fileNameLen,4)){
+    printf("[server]Failed to read the length of the name of the searched file!\n");
+    return;
+  }
+  fileName.resize(fileNameLen);
+  for (int i=0;i<fileNameLen;++i){
+    if (-1 == read(sd,&fileName[i],1)){
+      printf("[server]Failed to read the %d th byte of the searched file name!\n", i+1);
+      return;
+    }
+  }
+  uint filesCount = chordFiles[fileName].size();
+  if (-1 == write(sd,&filesCount,4)){
+    printf("[server]Failed to send back to the client the number of found files!\n");
+    return;
+  }
+  if (!filesCount){
+    return;
+  }
+  for (int i=0;i<filesCount;++i){
+    uint fileAddressLen = chordFiles[fileName][i].address.size();
+    if (-1 == write(sd,&chordFiles[fileName][i].id,4) || -1 == write(sd,&fileAddressLen,4) 
+      || -1 == write(sd,chordFiles[fileName][i].address.c_str(),fileAddressLen) || -1 == write(sd,&chordFiles[fileName][i].port,4)) {
+      printf("Failed to send back information about the %d th found file!\n", i+1);
+      return;
+    }
+  }
 }
 
 node serverFindSucc(const node& nd, uint id) {
@@ -771,12 +880,16 @@ static void* treat(void* arg) {
       break;
     // Part2Part functionalities:
     case SRV_ADD_FILE:
+      serverAddSharedFile(sd);
       break;
     case SRV_DOWNLOAD_FILE:
       serverDownloadFileLogic(sd);
       break;
     case SRV_LIST_FILES:
       serverListFilesToDownloadLogic(sd);
+      break;
+    case SRV_SEARCH_FILE:
+      serverSearchFiles(sd);
       break;
     default:
       serverClients[thisThreadInfo->threadNo].sd = THREAD_EXIT;
@@ -793,6 +906,91 @@ static void* treat(void* arg) {
   serverClients[thisThreadInfo->threadNo].sd = THREAD_EXIT;
   return NULL;
 };
+
+void clientAddFileLogic(const cmd::commandResult& command) {
+  std::string fileName = command.getStringOptionValue("-name");
+  std::string filePath = command.getStringOptionValue("-path");
+  if (fileName == "none" || filePath == "none"){
+    printf("You have to specify the name and the path of the file! (-name and -path options)\n");
+    return;
+  }
+  shareFile(fileName, filePath);
+}
+
+void clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileName){
+  int sd;
+  if (!initClient(sd, nd.address.c_str(), nd.port)){
+    return;
+  }
+  uint request = SRV_SEARCH_FILE, fileNameLen = fileName.size(), filesCount;
+  uint fileId, fileOwnerPort, fileOwnerIpLen;
+  std::string fileOwnerIp;
+  if (-1 == write(sd,&request,4) || -1 == write(sd,&fileNameLen,4) || -1 == write(sd,fileName.c_str(),fileNameLen)){
+    close(sd);
+    printf("Error when sending protocol data to the peer that stores information about the searched files!\n");
+    return;
+  }
+  if (-1 == read(sd,&filesCount,4)){
+    close(sd);
+    printf("Error when reading the number of files for the search operation!\n");
+    return;
+  }
+  if (!filesCount){
+    printf("There are no files in the network with the specified name!\n");
+    return;
+  }
+  printf("There are %d files in the network with the specified name: \n", filesCount);
+  for (int i=0;i<filesCount;++i){
+    if (-1 == read(sd,&fileId,4)){
+      close(sd);
+      printf("Error when reading the %d th file id!\n", i+1);
+      return;
+    }
+    if (-1 == read(sd,&fileOwnerIpLen,4)){
+      close(sd);
+      printf("Error when reading the %d th file owner address len!\n",i+1);
+      return;
+    }
+    fileOwnerIp.resize(fileOwnerIpLen);
+    for (int j=0;j<fileOwnerIpLen;++j){
+      if (-1 == read(sd,&fileOwnerIp[j],1)){
+        printf("Error when reading the %d th byte of the %d th file's owner address!\n",j+1,i+1);
+        close(sd);
+        return;
+      }
+    }
+    if (-1 == read(sd,&fileOwnerPort,4)){
+      close(sd);
+      printf("Error when reading the port of the %d th file's owner!\n",i+1);
+      return;
+    }
+    printf("%d. Name: %s, id: %d, address: %s, port: %d\n", (i+1), fileName.c_str(), fileId, fileOwnerIp.c_str(), fileOwnerPort);
+  }
+  close(sd);
+}
+
+void clientSearchFileLogic(const cmd::commandResult& command) {
+  std::string fileName = command.getStringOptionValue("-name");
+  if (fileName == "none") {
+    printf("You have to specify the name and the path of the file! (-name option)\n");
+    return;
+  }
+  uint fileChordHash = getHash(fileName.c_str());
+  node responsibleNode = serverFindSucc(fileChordHash);
+  if (info.me == responsibleNode){
+    uint filesCount = chordFiles[fileName].size();
+    if (!filesCount){
+      printf("There are no files in the network with the specified name!\n");
+    } else {
+      printf("There are %d files in the network with the specified name: \n", filesCount);
+      for (int i=0;i<filesCount;++i){
+        printf("%d. Name: %s, id: %d, address: %s, port: %d\n", (i+1), fileName.c_str(), chordFiles[fileName][i].id, chordFiles[fileName][i].address.c_str(), chordFiles[fileName][i].port);
+      }
+    }
+  } else {
+    clientSearchFileLogicAnotherPeer(responsibleNode, fileName);
+  }
+}
 
 void clientDownloadFileLogic(const cmd::commandResult& command) {
   std::string fileName  = command.getStringOptionValue("-name");
@@ -1009,9 +1207,10 @@ void clientLogic() {
 bool executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& command){
   switch (command.id){
     case cmd::commandId::ADD_FILE:
-      shareFile(command);
+      clientAddFileLogic(command);
       break;
     case cmd::commandId::SEARCH_FILE:
+      clientSearchFileLogic(command);
       break;
     case cmd::commandId::DOWNLOAD_FILE:
       clientDownloadFileLogic(command);
@@ -1039,6 +1238,9 @@ bool executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& 
       break;
     case cmd::commandId::CHORD_NODE_INFO:
       printThisChordNodeInfo();
+      break;
+    case cmd::commandId::CHORD_LIST:
+      printThisChordNodeFiles();
       break;
     case cmd::commandId::CHORD_SUCC:
       printChordSucc(command);
@@ -1109,6 +1311,7 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommandOptionBoolean(cmd::commandId::CONFIG_AUTO_ADD, "-disable", false);
 
   parser.addCommand(cmd::commandId::CHORD_NODE_INFO, "chord-info", "prints info about this chord node");
+  parser.addCommand(cmd::commandId::CHORD_LIST, "chord-list", "prints all the files this chord node is responsible for");
 
   parser.addCommand(cmd::commandId::CHORD_SUCC, "chord-succ", "prints successor(id) in the Chord network");
   parser.addCommandOptionNumber(cmd::commandId::CHORD_SUCC, "-id", -1);
