@@ -112,5 +112,42 @@
 //          uint                            - ownerAddressLen
 //          char[ownerAddressLen]           - ownerAddress
 //          uint                            - ownerPort
+#define     SRV_NODE_LEFT                   15                      // ---
+//          uint                            - nodeLeftId
+//          uint                            - nodeLeftPort
+//          uint                            - nodeLeftIpLen
+//          char[nodeLeftIpLen]             - nodeLeftIp
+//          uint                            - nodeReplacerId
+//          uint                            - nodeReplacerPort
+//          uint                            - nodeReplacerIpLen
+//          char[nodeReplacerIpLen]         - nodeReplacerIp
+#define     SRV_ADD_PREDECESSOR_FILES       16                      // ---
+//          client:
+//          uint                            - predId
+//          uint                            - predPort
+//          uint                            - predIpLen
+//          char[predIpLen]                 - predIp
+//          server:
+#define     SRV_ADD_PREDECESSOR_FILES_NO    106
+#define     SRV_ADD_PREDECESSOR_FILES_OK    107
+//          if (107) client:
+//          uint                            - numberOfFiles
+//          numberOfFiles times:
+//          uint                            - fileNameLen
+//          char[fileNameLen]               - fileName
+//          uint                            - fileChordId
+//          uint                            - fileId
+//          uint                            - ownerAddressLen
+//          char[ownerAddressLen]           - ownerAddress
+//          uint                            - ownerPort
+#define     SRV_CONCURRENT                   255                    // ---
+//          client:
+//          uint                            - nodeId
+//          uint                            - nodePort
+//          uint                            - nodeIpLen
+//          char[nodeIpLen]                 - nodeIp
+//          int                             - number
+//          server:
+//          int                             - number + 1
 
 #endif // DEFINES_H

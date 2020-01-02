@@ -40,6 +40,10 @@ void          joinChordNetwork(const node& randomNode);
 void          initFingerTable(const node& randomNode);
 void          updateOthers();
 void          getFilesFromPredecessor();
+void          leaveChordNetwork();
+void          moveFilesToSuccessor();
+void          updatePredecessorOfSuccessor();
+void          replaceMeInFingersTable();
 
 SHA1          sha1;
 uint          getHash(const char* str);
@@ -73,11 +77,14 @@ void          serverSendSuccessor(int sd);
 void          serverSendPredecessor(int sd);
 void          serverUpdateSuccessorRequest(const node& nd);
 void          serverUpdateSuccessor(int sd);
+void          serverUpdatePredecessorRequest(const node& nd, const node& pred);
 void          serverUpdatePredecessorRequest(const node& nd);
 void          serverUpdatePredecessor(int sd);
 void          serverUpdateFingerTable(int sd);
 void          serverUpdateFingerTable(const node& p, const node& nd, uint i);
 void          serverChordGetKeysFromPredecessor(int sd);
+void          serverAddFilesFromPredecessor(int sd);
+void          serverReplaceNodeFromFingersTable(int sd);
 
 void          serverChordStabilization(int sd);
 void          chordStabilizationNotify(const node& nd);
@@ -112,6 +119,9 @@ void          printChordPred(const cmd::commandResult& command);
 bool          initClient(int& sd, const char* ipAddress, int port);
 void          clientLogic();
 
+void          serverConcurrentFunction(int sd);
+void          clientConcurrentFunction(const cmd::commandResult& command);
+
 int main(int argc, char* argv[]) {
   if (!check(argc, argv)){
     return 1;
@@ -137,6 +147,7 @@ int main(int argc, char* argv[]) {
   }
 
   clientLogic();
+  leaveChordNetwork();
   return 0;
 };
 
@@ -266,6 +277,80 @@ void getFilesFromPredecessor() {
       return;
     }
     chordFiles[myFile.name].push_back(myFile);
+  }
+  close(sd);
+}
+
+void leaveChordNetwork() {
+  if (info.me == info.fTable.fingers[0]){
+    return;
+  }
+  moveFilesToSuccessor();
+  updatePredecessorOfSuccessor();
+  replaceMeInFingersTable();
+}
+
+void moveFilesToSuccessor() {
+  int sd;
+  uint request = SRV_ADD_PREDECESSOR_FILES, response;
+  if (!initClient(sd,info.fTable.fingers[0].address.c_str(),info.fTable.fingers[0].port)){
+    return;
+  }
+  if (-1 == write(sd,&request,4)){
+    printf("[client]Failed to send protocol data to my successor!\n");
+    close(sd);
+    return;
+  }
+  if (!sendNodeInfo(sd,info.me)){
+    printf("[client]Failed to send info about this node to successor for a \"moveFilesToSuccessor\" operation!\n");
+    close(sd);
+    return;
+  }
+  if (-1 == read(sd,&response,4)){
+    printf("[client]Failed to read the response from peer for a \"moveFilesToSuccessor\" operation!\n");
+    close(sd);
+    return;
+  }
+  if (response == SRV_ADD_PREDECESSOR_FILES_NO){
+    return;
+  }
+  uint fileIndex = 0, filesCount = 0;
+  for (auto& bucket:chordFiles){
+    filesCount += bucket.second.size();
+  }
+  if (-1 == write(sd,&filesCount,4)){
+    printf("[client]Failed to send the number of files I have to send to my successor!\n");
+    close(sd);
+    return;
+  }
+  for (auto& bucket:chordFiles){
+    for (auto& file:bucket.second){
+      ++fileIndex;
+      if (!sendChordFileInfo(sd,file)){
+        printf("[client]Failed to send the %d th file to my successor!\n", fileIndex);
+        close(sd);
+        return;
+      }
+    }
+    bucket.second.clear();
+  }
+  close(sd);
+}
+
+void updatePredecessorOfSuccessor() {
+  serverUpdatePredecessorRequest(info.fTable.fingers[0], info.fTable.predecessor);
+}
+
+void replaceMeInFingersTable() {
+  uint request = SRV_NODE_LEFT;
+  int sd;
+  if (!initClient(sd, info.fTable.fingers[0].address.c_str(), info.fTable.fingers[0].port)){
+    return;
+  }
+  if (-1 == write(sd,&request,4) || !sendNodeInfo(sd,info.me) || !sendNodeInfo(sd,info.fTable.fingers[0])){
+    close(sd);
+    printf("Failed to send protocol data for a \"replaceMeInFingersTable\" operation!\n");
+    return;
   }
   close(sd);
 }
@@ -792,22 +877,27 @@ void serverUpdateSuccessor(int sd) {
   info.fTable.fingers[0] = newSucc;
 }
 
-void serverUpdatePredecessorRequest(const node& nd) {
+void serverUpdatePredecessorRequest(const node& nd, const node& pred) {
   int sd;
   if (!initClient(sd, nd.address.c_str(), nd.port)){
     return;
   }
   uint request = SRV_UPDATE_PREDECESSOR;
   if (-1 == write(sd, &request, 4)){
-    printf("[server]Failed to ask a peer to set this server as its predecessor!\n");
+    printf("[server]Failed to ask a peer to change its predecessor!\n");
     close(sd);
     return;
   }
 
-  debugMessage("I'm asking node %u to set me (node %u) as its predecessor\n", nd.key, info.me.key);
-
-  sendNodeInfo(sd, info.me);
+  debugMessage("I'm asking node %u to chage its predecessor to %u\n", nd.key, pred.key);
+  
+  sendNodeInfo(sd, pred);
   close(sd);
+}
+
+void serverUpdatePredecessorRequest(const node& nd) {
+  debugMessage("I'm asking node %u to set me (node %u) as its predecessor\n", nd.key, info.me.key);
+  serverUpdatePredecessorRequest(nd, info.me);
 }
 
 void serverUpdatePredecessor(int sd){
@@ -896,6 +986,71 @@ void serverChordGetKeysFromPredecessor(int sd) {
     }
     bucket.second.clear();
   }
+}
+
+void serverAddFilesFromPredecessor(int sd){
+  node pred;
+  uint response;
+  if (!readNodeInfo(sd,pred)){
+    printf("[server]Failed to read info about the node that wants to send me its files!\n");
+    return;
+  }
+  if (pred != info.fTable.predecessor){
+    response = SRV_ADD_PREDECESSOR_FILES_NO;
+  } else {
+    response = SRV_ADD_PREDECESSOR_FILES_OK;
+  }
+  if (-1 == write(sd, &response, 4)){
+    printf("[server]Failed to send protocol data for a \"serverAddFilesFromPredecessor\" operation!\n");
+    return;
+  }
+  if (response == SRV_ADD_PREDECESSOR_FILES_NO){
+    return;
+  }
+  uint filesCount = 0;
+  chordFileInfo predFile;
+  if (-1 == read(sd,&filesCount,4)){
+    printf("[server]Failed to read the number of files my predecessor has to send me!\n");
+    return;
+  }
+  for (int i=0;i<filesCount;++i){
+    if (!readChordFileInfo(sd,predFile)){
+      printf("[server]Failed to read the %d th file from my predecessor!\n", i);
+      return;
+    }
+    chordFiles[predFile.name].push_back(predFile);
+  }
+}
+
+void serverReplaceNodeFromFingersTable(int sd) {
+  node nodeThatLeft, nodeReplacer, succ;
+  if (!readNodeInfo(sd,nodeThatLeft) || !readNodeInfo(sd,nodeReplacer)){
+    printf("[server]Error when reading protocol data for a \"replaceNodeFromFingersTable\" operation!\n");
+    return;
+  }
+  if (nodeThatLeft == info.me){
+    return;
+  }
+  succ = info.fTable.fingers[0];
+  for (int i=0;i<SHA_HASH_BITS;++i){
+    if (info.fTable.fingers[i] == nodeThatLeft){
+      info.fTable.fingers[i] = nodeReplacer;
+    }
+  }
+  if (nodeThatLeft == succ){
+    return;
+  }
+  int newSd;
+  uint request = SRV_NODE_LEFT;
+  if (!initClient(newSd, succ.address.c_str(), succ.port)){
+    return;
+  }
+  if (-1 == write(newSd,&request,4) || !sendNodeInfo(newSd,nodeThatLeft) || !sendNodeInfo(newSd,nodeReplacer)){
+    close(newSd);
+    printf("Failed to send protocol data for a \"replaceMeInFingersTable\" operation!\n");
+    return;
+  }
+  close(newSd);
 }
 
 void serverChordStabilization(int sd) {
@@ -1067,6 +1222,12 @@ static void* treat(void* arg) {
     case SRV_GET_MY_KEYS:
       serverChordGetKeysFromPredecessor(sd);
       break;
+    case SRV_ADD_PREDECESSOR_FILES:
+      serverAddFilesFromPredecessor(sd);
+      break;
+    case SRV_NODE_LEFT:
+      serverReplaceNodeFromFingersTable(sd);
+      break;
     // Part2Part functionalities:
     case SRV_ADD_FILE:
       serverAddSharedFile(sd);
@@ -1082,6 +1243,10 @@ static void* treat(void* arg) {
       break;
     case SRV_REMOVE_FILE:
       serverRemoveFile(sd);
+      break;
+    // Other:
+    case SRV_CONCURRENT:
+      serverConcurrentFunction(sd);
       break;
     default:
       serverClients[thisThreadInfo->threadNo].sd = THREAD_EXIT;
@@ -1487,6 +1652,9 @@ bool executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& 
       break;
     case cmd::commandId::CLOSE:
       return false;
+    case cmd::commandId::CONCURRENT:
+      clientConcurrentFunction(command);
+      break;
     case cmd::commandId::WOC:
       std::cout<<"Invalid command!\n";
       break;
@@ -1555,4 +1723,66 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommand(cmd::commandId::LISTALL, "list-cmd" ,"displays information about all the commands");
 
   parser.addCommand(cmd::commandId::CLOSE, "close", "closes the application");
+
+  parser.addCommand(cmd::commandId::CONCURRENT, "concurrent-server", "a command that can be used to show that the servers are concurrent");
+  parser.addCommandOptionString(cmd::commandId::CONCURRENT, "-ip:<peerIP>", "none");
+  parser.addCommandOptionNumber(cmd::commandId::CONCURRENT, "-port:<peerPort>", -1);
+}
+
+void serverConcurrentFunction(int sd) {
+  node peer;
+  int number;
+  if (!readNodeInfo(sd,peer)){
+    printf("[server]Failed to read the information about the other peer in the concurrentFunction!\n");
+    return;
+  }
+  std::cout<<"Node "<<peer<<" has connected!\n";
+  if (-1 == read(sd,&number,4)){
+    printf("[server]Failed to read the number sent by the peer!\n");
+    return;
+  }
+  ++number;
+  if (-1 == write(sd,&number,4)){
+    printf("[server]Failed to sent the incremented number to the peer!\n");
+    return;
+  }
+}
+
+void clientConcurrentFunction(const cmd::commandResult& command) {
+  int peerPort = command.getNumberOptionValue("-port");
+  if (peerPort == -1){
+    printf("[client]You have to specify the port of the peer!\n");
+    return;
+  }
+  std::string peerIp = command.getStringOptionValue("-ip");
+  if (peerIp == "none"){
+    printf("[client]You have to specify the ip of the peer!\n");
+    return;
+  }
+  uint request = SRV_CONCURRENT;
+  int sd;
+  if (!initClient(sd,peerIp.c_str(),peerPort)){
+    printf("[client]Failed to connect to the other peer!\n");
+    return;
+  }
+  if (-1 == write(sd,&request,4) || !sendNodeInfo(sd,info.me)) {
+    printf("[client]Failed to send protocol data in the client concurrent function!\n");
+    close(sd);
+    return;
+  }
+  int number;
+  std::cout<<"Number = ";
+  std::cin>>number;
+  if (-1 == write(sd,&number,4)){
+    printf("[client]Failed to send protocol data in the client concurrent function!\n");
+    close(sd);
+    return;
+  }
+  if (-1 == read(sd,&number,4)){
+    printf("[client]Failed to read the number sent by the peer!\n");
+    close(sd);
+    return;
+  }
+  std::cout<<"Server sent: "<<number<<'\n';
+  close(sd);
 }

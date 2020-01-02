@@ -42,6 +42,8 @@ std::string cmd::commandEnumToString(cmd::commandId cmdId){
             return "list";
         case cmd::commandId::CLOSE:
             return "close";
+        case cmd::commandId::CONCURRENT:
+            return "concurrent-server";
         case cmd::commandId::EMPTYLINE:
             return "empty line command";
         case cmd::commandId::WOC:

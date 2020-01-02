@@ -30,6 +30,7 @@ namespace cmd{
         CHORD_CHECK,
         LISTALL,
         CLOSE,
+        CONCURRENT,
         EMPTYLINE, // returned when the entered line is empty
         WOC, // the type of all invalid commands
         WOCOPT // the type for commands with invalid options
