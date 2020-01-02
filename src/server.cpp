@@ -39,12 +39,15 @@ void          joinChordNetwork();
 void          joinChordNetwork(const node& randomNode);
 void          initFingerTable(const node& randomNode);
 void          updateOthers();
+void          getFilesFromPredecessor();
 
 SHA1          sha1;
 uint          getHash(const char* str);
 
 uint          addFileToNetworkToPeer(const node& nd, const sharedFileInfo& file);
 bool          addFileToNetwork(const sharedFileInfo& file);
+uint          removeFileFromNetworkFromPeer(const node& nd, const sharedFileInfo file);
+bool          removeFileFromNetwork(const sharedFileInfo& file);
 void          shareFile(const std::string& name, const std::string& path, bool atInit = false);
 void          listSharedFiles();
 
@@ -56,6 +59,8 @@ void          serverDownloadFileUpload(int sd, sharedFileInfo* sharedFile);
 void          serverListFilesToDownloadLogic(int sd);
 bool          serverListFilesToDownloadSendFile(int sd, sharedFileInfo* sharedFile);
 void          serverSearchFiles(int sd);
+uint          serverRemoveFileLogic(const chordFileInfo& removedFile);
+void          serverRemoveFile(int sd);
 
 node          serverFindSucc(const node& nd, uint id);
 node          serverFindSucc(uint id);
@@ -72,6 +77,7 @@ void          serverUpdatePredecessorRequest(const node& nd);
 void          serverUpdatePredecessor(int sd);
 void          serverUpdateFingerTable(int sd);
 void          serverUpdateFingerTable(const node& p, const node& nd, uint i);
+void          serverChordGetKeysFromPredecessor(int sd);
 
 void          serverChordStabilization(int sd);
 void          chordStabilizationNotify(const node& nd);
@@ -97,6 +103,7 @@ void          clientSearchFileLogic(const cmd::commandResult& command);
 void          clientDownloadFileLogic(const cmd::commandResult& command);
 void          clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId);
 void          clientListFilesToDownloadLogic(const cmd::commandResult& command);
+void          clientRemoveFileLogic(const cmd::commandResult& command);
 
 bool          checkId(int id);
 void          printChordSucc(const cmd::commandResult& command);
@@ -135,13 +142,13 @@ int main(int argc, char* argv[]) {
 
 node getFirstNodeInfo(){
   node res;
-  res.address = "127.0.0.1";
+  res.address = myAddress;
   res.port = CHORD_FIRST_PORT;
   return res;
 }
 
 bool isFirstChordNode(const std::string& address, uint port){
-  return (address == "127.0.0.1" && port == CHORD_FIRST_PORT);
+  return (address == myAddress && port == CHORD_FIRST_PORT);
 }
 
 bool check(int argc, char* argv[]){
@@ -158,7 +165,7 @@ bool check(int argc, char* argv[]){
   while (argv[1][digitsNo] && argv[1][digitsNo] >= '0' && argv[1][digitsNo] <= '9'){
     info.me.port = info.me.port * 10 + (argv[1][digitsNo++] - '0');
   }
-  info.me.address = std::string("127.0.0.1");
+  info.me.address = myAddress;
   std::string keyStr = info.me.address + std::to_string(info.me.port);
   info.me.key = getHash(keyStr.c_str());
   return true;
@@ -195,6 +202,7 @@ void joinChordNetwork() {
 void joinChordNetwork(const node& randomNode) {
   initFingerTable(randomNode);
   updateOthers();
+  getFilesFromPredecessor();
 }
 
 void initFingerTable(const node& randomNode) {
@@ -221,6 +229,45 @@ void updateOthers() {
       serverUpdateFingerTable(p, info.me, i);
     }
   }
+}
+
+void getFilesFromPredecessor() {
+  if (info.fTable.predecessor == info.me){
+    return;
+  }
+  int sd;
+  if (!initClient(sd, info.fTable.predecessor.address.c_str(), info.fTable.predecessor.port)){
+    return;
+  }
+  uint request = SRV_GET_MY_KEYS, filesCount, response;
+  chordFileInfo myFile;
+  if (-1 == write(sd,&request,4) || -1 == write(sd,&info.me.key,4)){
+    printf("Failed to send protocol data to my predecessor in order to get the keys I'm responsible for!\n");
+    close(sd);
+    return;
+  }
+  if (-1 == read(sd,&response,4)){
+    printf("Failed to read the response flag from my predecessor!\n");
+    close(sd);
+    return;
+  }
+  if (!(response == SRV_GET_MY_KEYS_OK)){
+    return;
+  }
+  if (-1 == read(sd,&filesCount,4)){
+    printf("Failed to read the number of files I'm responbile for that my predecessor sent me!\n");
+    close(sd);
+    return;
+  }
+  for (int i=0;i<filesCount;++i){
+    if (!readChordFileInfo(sd,myFile)){
+      printf("Failed to read the %d th file I'm responsible for!\n", i);
+      close(sd);
+      return;
+    }
+    chordFiles[myFile.name].push_back(myFile);
+  }
+  close(sd);
 }
 
 uint getHash(const char* str) {
@@ -276,6 +323,55 @@ bool addFileToNetwork(const sharedFileInfo& file){
   return response == (SRV_ADD_FILE_OK_ADDED);
 }
 
+uint removeFileFromNetworkFromPeer(const node& nd, const sharedFileInfo file) {
+  uint response;
+  if (info.me == nd){
+    chordFileInfo newFile(file.name, file.shaHash, file.customHash, nd.address, nd.port);
+    response = serverRemoveFileLogic(newFile);
+  } else {
+    int sd;
+    if (!initClient(sd, nd.address.c_str(), nd.port)){
+      return SRV_ERROR;
+    }
+    uint request = SRV_REMOVE_FILE;
+    if (-1 == write(sd, &request, 4)){
+      printf("[!!!]Failed to send protocol data to peer!\n");
+      close(sd);
+      return SRV_ERROR;
+    }
+    if (!sendChordFileInfo(sd, file)){
+      close(sd);
+      return SRV_ERROR;
+    }
+    if (-1 == read(sd,&response,4)){
+      printf("[!!!]Failed to read the server response for a \"removeFileFromNetwork\" operation!\n");
+      close(sd);
+      return SRV_ERROR;
+    }
+    close(sd);
+  }
+  if (response == SRV_REMOVE_FILE_NOT_FOUND){
+    printf("The server claims that the file doesn't exist in the network!\n");
+  }
+  return response;
+}
+
+bool removeFileFromNetwork(const sharedFileInfo& file) {
+  node responsibleNode;
+  if (file.shaHash == info.me.key){
+    responsibleNode = info.me;
+  } else {
+    responsibleNode = serverFindSucc(file.shaHash);
+  }
+  uint response = removeFileFromNetworkFromPeer(responsibleNode, file);
+  if (response == SRV_REMOVE_FILE_OK_REMOVED){
+    std::cout<<"File removed successfully from node: "<<responsibleNode<<'\n';
+  } else if (response == SRV_ERROR) {
+    std::cout<<"Server error!\n";
+  }
+  return (response == SRV_REMOVE_FILE_OK_REMOVED);
+}
+
 void shareFile(const std::string& name, const std::string& path, bool atInit) {
   if (!fileExists(path.c_str())) {
     if (!atInit){
@@ -298,6 +394,9 @@ void listSharedFiles() {
     for (auto file : bucket.second) {
       printf("%d. name:%s path:%s id:%u\n", fileNumber++, file.name.c_str(), file.path.c_str(), file.customHash);
     }
+  }
+  if (fileNumber == 1){
+    printf("None!\n");
   }
 }
 
@@ -330,7 +429,7 @@ void serverAddSharedFile(int sd) {
   }
   uint response = serverAddSharedFileLogic(newFile);
   if (-1 == write(sd,&response,4)) {
-    printf("[server]Errow when sending the response back to the client (\"serverAddSharedFile\")!\n");
+    printf("[server]Error when sending the response back to the client (\"serverAddSharedFile\")!\n");
   }
 }
 
@@ -497,6 +596,35 @@ void serverSearchFiles(int sd) {
       printf("Failed to send back information about the %d th found file!\n", i+1);
       return;
     }
+  }
+}
+
+uint serverRemoveFileLogic(const chordFileInfo& removedFile) {
+  if (!chordFiles[removedFile.name].size()){
+    return SRV_REMOVE_FILE_NOT_FOUND;
+  }
+  int position = -1;
+  for (int i=0;i<chordFiles[removedFile.name].size();++i){
+    if (removedFile == chordFiles[removedFile.name][i]){
+      position = i;
+      break;
+    }
+  }
+  if (position == -1){
+    return SRV_REMOVE_FILE_NOT_FOUND;
+  }
+  chordFiles[removedFile.name].erase(chordFiles[removedFile.name].begin()+position);
+  return SRV_REMOVE_FILE_OK_REMOVED;
+}
+
+void serverRemoveFile(int sd) {
+  chordFileInfo removedFile;
+   if (!readChordFileInfo(sd, removedFile)){
+    return;
+  }
+  uint response = serverRemoveFileLogic(removedFile);
+  if (-1 == write(sd,&response,4)) {
+    printf("[server]Error when sending the response back to the client (\"serverRemoveFile\")!\n");
   }
 }
 
@@ -723,6 +851,53 @@ void serverUpdateFingerTable(const node& p, const node& nd, uint i) {
   close(sd);
 }
 
+void serverChordGetKeysFromPredecessor(int sd) {
+  uint successorKey;
+  if (-1 == read(sd,&successorKey,4)){
+    printf("[server]Failed to read the key of the peer that claims is my successor in order for me to send its files!\n");
+    return;
+  }
+  if (successorKey != info.fTable.fingers[0].key){
+    printf("[server]Peer %u told me it is my successor, but I have a node that has a lower id, %u!\n", successorKey, info.fTable.fingers[0].key);
+    serverSendErrorFlag(sd);
+    return;
+  }
+  uint response = SRV_GET_MY_KEYS_OK;
+  if (-1 == write(sd,&response,4)){
+    printf("[server]Failed to send a flag to my successor for a \"getKeysFromPredecessor\" operation!\n");
+    return;
+  }
+  uint filesCount = 0, fileSentIndex = 0;
+  for (auto& bucket:chordFiles){
+    if (!bucket.second.size()){
+      continue;
+    }
+    if (between(bucket.second[0].chordId, info.me.key+1, successorKey)){
+      filesCount += bucket.second.size();
+    }
+  }
+  if (-1 == write(sd,&filesCount,4)){
+    printf("[server]Failed to send the number of files that my successor is responsible for!\n");
+    return;
+  }
+  for (auto& bucket:chordFiles){
+    if (!bucket.second.size()){
+      continue;
+    }
+    if (!between(bucket.second[0].chordId, info.me.key+1, successorKey)){
+      continue;
+    }
+    for (int i=bucket.second.size()-1;i>=0;--i){
+      ++fileSentIndex;
+      if (!sendChordFileInfo(sd,bucket.second[i])){
+        printf("[server]Error when sending info about the %d th file to my successor!\n", fileSentIndex);
+        return;
+      }
+    }
+    bucket.second.clear();
+  }
+}
+
 void serverChordStabilization(int sd) {
   node np;
   debugMessage("A node sent me a stabilization flag, I'm reading info about that node!\n");
@@ -754,6 +929,9 @@ void chordStabilizationNotify(const node& nd){
 
 void chordStabilize() {
   node succPred = serverGetPred(info.fTable.fingers[0]);
+  if (succPred == info.me){
+    return;
+  }
   if (between(succPred.key, info.me.key+1, (int)info.fTable.fingers[0].key-1)){
     info.fTable.fingers[0] = succPred;
   }
@@ -761,14 +939,22 @@ void chordStabilize() {
 }
 
 void chordFixFingers() {
-  int finger = (rand() % (SHA_HASH_BITS - 1)) + 1;
+  int finger = (rand() % (SHA_HASH_BITS - 1)) + 1, i;
+  for (i=1;i<5;++i){
+    if (info.fTable.fingers[finger] == info.me){
+      finger = (rand() % (SHA_HASH_BITS - 1)) + 1;
+    }
+  }
+  if (i == 5){
+    return;
+  }
   info.fTable.fingers[finger] = serverFindSucc(info.intervals[finger].start);
 }
 
 static void* chordStabilization(void *) {
   srand(time(NULL));
   while (true){
-    usleep(500000);
+    sleep(1);
     chordStabilize();
     chordFixFingers();
   }
@@ -878,6 +1064,9 @@ static void* treat(void* arg) {
     case SRV_STABILIZATION:
       serverChordStabilization(sd);
       break;
+    case SRV_GET_MY_KEYS:
+      serverChordGetKeysFromPredecessor(sd);
+      break;
     // Part2Part functionalities:
     case SRV_ADD_FILE:
       serverAddSharedFile(sd);
@@ -890,6 +1079,9 @@ static void* treat(void* arg) {
       break;
     case SRV_SEARCH_FILE:
       serverSearchFiles(sd);
+      break;
+    case SRV_REMOVE_FILE:
+      serverRemoveFile(sd);
       break;
     default:
       serverClients[thisThreadInfo->threadNo].sd = THREAD_EXIT;
@@ -936,6 +1128,7 @@ void clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileNam
     return;
   }
   if (!filesCount){
+    close(sd);
     printf("There are no files in the network with the specified name!\n");
     return;
   }
@@ -1154,6 +1347,35 @@ void clientListFilesToDownloadLogic(const cmd::commandResult& command) {
   close(sd);
 }
 
+void clientRemoveFileLogic(const cmd::commandResult& command) {
+  std::string fileName = command.getStringOptionValue("-name");
+  std::string filePath = command.getStringOptionValue("-path");
+  if (fileName == "none" || filePath == "none"){
+    printf("You have to specify the name and the path of the file you want to remove! (-name and -path options)\n");
+    return;
+  }
+  if (!sharedFiles.count(fileName)){
+    printf("You don't share any file that has the name %s!\n", fileName.c_str());
+    return;
+  }
+  sharedFileInfo *toRem = NULL;
+  int position = -1;
+  for (int i=0;i<sharedFiles[fileName].size();++i){
+    if (sharedFiles[fileName][i].path == filePath){
+      toRem = &sharedFiles[fileName][i];
+      position = i;
+      break;
+    }
+  }
+  if (!toRem){
+    printf("You don't share any file that has the name %s and the path %s!\n", fileName.c_str(), filePath.c_str());
+    return;
+  }
+  if (removeFileFromNetwork(*toRem)){
+    sharedFiles[fileName].erase(sharedFiles[fileName].begin()+position);
+  }
+}
+
 bool checkId(int id){
   return id >= 0 && id <= SHA_HASH_MOD;
 }
@@ -1214,6 +1436,9 @@ bool executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& 
       break;
     case cmd::commandId::DOWNLOAD_FILE:
       clientDownloadFileLogic(command);
+      break;
+    case cmd::commandId::REMOVE_FILE:
+      clientRemoveFileLogic(command);
       break;
     case cmd::commandId::LIST_FILES_TO_DOWNLOAD:
       clientListFilesToDownloadLogic(command);
@@ -1287,6 +1512,10 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommandOptionString(cmd::commandId::DOWNLOAD_FILE, "-ip:<peerIP>", "none");
   parser.addCommandOptionNumber(cmd::commandId::DOWNLOAD_FILE, "-id:<fileId>", -1);
   parser.addCommandOptionNumber(cmd::commandId::DOWNLOAD_FILE, "-port:<peerPort>", -1);
+
+  parser.addCommand(cmd::commandId::REMOVE_FILE, "rm", "removes a file from the network");
+  parser.addCommandOptionString(cmd::commandId::REMOVE_FILE, "-name:<fileNameInChord>", "none");
+  parser.addCommandOptionString(cmd::commandId::REMOVE_FILE, "-path:<filePath>", "none");
 
   parser.addCommand(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "list", "requests a peer to send information about all the file it shares");
   parser.addCommandOptionString(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "-ip:<peerIP>", "none");

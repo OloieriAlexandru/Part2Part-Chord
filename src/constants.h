@@ -1,6 +1,8 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
+#include <string>
+
 #define DEBUG           0
 
 #define THREADS_COUNT   120
@@ -23,5 +25,7 @@
 const char* const userConfigFilePath        = ".user.config";
 const char* const userDownloadsFolder       = "downloads/";
 const char* const userDownloadsExtension    = ".txt";
+
+const std::string myAddress                 = "127.0.0.1";
 
 #endif // CONSTANTS_H

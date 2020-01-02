@@ -38,6 +38,7 @@
 //          client:
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
+//          uint                            - fileChordId
 //          uint                            - fileId
 //          uint                            - ownerAddressLen
 //          char[ownerAddressLen]           - ownerAddress
@@ -73,7 +74,7 @@
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
 //          uint                            - fileId (needed when you download a file)
-#define     SRV_SEARCH_FILE                 12
+#define     SRV_SEARCH_FILE                 12                      // ---
 //          client:
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
@@ -84,5 +85,32 @@
 //          uint                            - fileOwnerIpLen
 //          char[fileIpLen]                 - fileOwnerIp
 //          uint                            - fileOwnerPort
+#define     SRV_REMOVE_FILE                 13                      // ---
+//          client:
+//          uint                            - fileNameLen
+//          char[fileNameLen]               - fileName
+//          uint                            - fileChordId
+//          uint                            - fileId
+//          uint                            - ownerAddressLen
+//          char[ownerAddressLen]           - ownerAddress
+//          uint                            - ownerPort
+//          server:
+#define     SRV_REMOVE_FILE_NOT_FOUND       103
+#define     SRV_REMOVE_FILE_OK_REMOVED      104
+#define     SRV_GET_MY_KEYS                 14                      // ---
+//          client:
+//          uint                            - successorKey
+//          server:
+//          SRV_ERROR
+#define     SRV_GET_MY_KEYS_OK              105
+//          uint                            - numberOfFiles
+//          numberOfFiles times:
+//          uint                            - fileNameLen
+//          char[fileNameLen]               - fileName
+//          uint                            - fileChordId
+//          uint                            - fileId
+//          uint                            - ownerAddressLen
+//          char[ownerAddressLen]           - ownerAddress
+//          uint                            - ownerPort
 
 #endif // DEFINES_H

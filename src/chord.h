@@ -98,6 +98,7 @@ bool    readNodeInfo(int sd, node& nd);
 
 bool    sendChordFileInfo(int sd, const std::string& fileName, const uint chordFileId, const uint fileId, const std::string& ownerAddress, const uint ownerPort);
 bool    sendChordFileInfo(int sd, const sharedFileInfo& file);
+bool    sendChordFileInfo(int sd, const chordFileInfo& file);
 bool    readChordFileInfo(int sd, std::string& fileName, uint& chordFileId, uint& fileId, std::string& ownerAddress, uint& ownerPort);
 bool    readChordFileInfo(int sd, chordFileInfo& fileInfo);
 

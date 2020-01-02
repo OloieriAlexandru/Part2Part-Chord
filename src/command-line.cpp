@@ -8,6 +8,8 @@ std::string cmd::commandEnumToString(cmd::commandId cmdId){
             return "search";
         case cmd::commandId::DOWNLOAD_FILE:
             return "download";
+        case cmd::commandId::REMOVE_FILE:
+            return "rm";
         case cmd::commandId::LIST_FILES_TO_DOWNLOAD:
             return "list";
         case cmd::commandId::LIST_FILES:

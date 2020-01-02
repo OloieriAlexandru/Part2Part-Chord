@@ -165,6 +165,10 @@ bool sendChordFileInfo(int sd, const sharedFileInfo& file) {
     return sendChordFileInfo(sd, file.name, file.shaHash, file.customHash, info.me.address, info.me.port);
 }
 
+bool sendChordFileInfo(int sd, const chordFileInfo& file) {
+    return sendChordFileInfo(sd, file.name, file.chordId, file.id, file.address, file.port);
+}
+
 bool readChordFileInfo(int sd, std::string& fileName, uint& chordFileId, uint& fileId, std::string& ownerAddress, uint& ownerPort) {
     uint len;
     if (-1 == read(sd,&len,4)){

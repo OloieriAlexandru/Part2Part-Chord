@@ -13,6 +13,7 @@ namespace cmd{
         ADD_FILE,
         SEARCH_FILE,
         DOWNLOAD_FILE,
+        REMOVE_FILE,
         LIST_FILES_TO_DOWNLOAD,
         LIST_FILES,
         CONFIG_ADD_FILE,
