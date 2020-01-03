@@ -56,6 +56,16 @@ std::string cmd::commandEnumToString(cmd::commandId cmdId){
     return "";
 }
 
+std::string cmd::commandArgumentTypeEnumToString(commandArgumentType cmdArgumentType){
+    switch(cmdArgumentType){
+        case cmd::commandArgumentType::STR:
+            return "string";
+        case cmd::commandArgumentType::NUM:
+            return "number";
+    }
+    return "";
+}
+
 std::string cmd::commandOptionTypeEnumToString(cmd::commandOptionType cmdOptionType){
     switch(cmdOptionType){
         case cmd::commandOptionType::STRING:
@@ -66,6 +76,44 @@ std::string cmd::commandOptionTypeEnumToString(cmd::commandOptionType cmdOptionT
             return "bool";
     }
     return "";
+}
+
+// --------- argumentResult ----------------------------------------------------------------------------------//
+
+cmd::argumentResult::argumentResult(const cmd::commandArgument& commandArg) {
+    type = commandArg.type;
+    name = commandArg.name;
+}
+
+void cmd::argumentResult::setValue(void* value) {
+    switch(type){
+        case STR:
+            stringValue = std::string((const char*)value);
+            break;
+        case NUM:
+            numberValue = *((int*)value);
+            break;
+        default:
+            break;
+    }
+}
+
+namespace cmd{
+    std::ostream& operator<<(std::ostream& out, const cmd::argumentResult& argResult){
+        out<<"name:"<<argResult.name<<", type:"<<commandArgumentTypeEnumToString(argResult.type);
+        out<<", value:";
+        switch(argResult.type){
+            case cmd::commandArgumentType::STR:
+                out<<argResult.stringValue;
+                break;
+            case cmd::commandArgumentType::NUM:
+                out<<argResult.numberValue;
+                break;
+            default:
+                break;
+        }
+        return out;
+    }
 }
 
 // --------- optionResult ----------------------------------------------------------------------------------//
@@ -111,8 +159,8 @@ cmd::optionResult::optionResult(const std::string optionName, const cmd::command
 
 namespace cmd{
     std::ostream& operator<<(std::ostream& out, const cmd::optionResult& optResult){
-        out<<optResult.name<<' '<<commandOptionTypeEnumToString(optResult.type)<<' ';
-        out<<"value: ";
+        out<<"name:"<<optResult.name<<", type:"<<commandOptionTypeEnumToString(optResult.type);
+        out<<", value:";
         switch(optResult.type){
             case STRING:
                 out<<(optResult.stringValue);
@@ -150,18 +198,52 @@ void cmd::commandResult::updateOption(const std::string& optionName, void* newVa
     }
 }
 
-void cmd::commandResult::clearOptions(){
+void cmd::commandResult::clear(){
+    arguments.clear();
     options.clear();
 }
 
 namespace cmd{
     std::ostream& operator<<(std::ostream& out, const cmd::commandResult& cmdResult){
-        out<<"Command: "<<commandEnumToString(cmdResult.id)<<", options: \n";
-        for (auto option:cmdResult.options){
-            out<<option<<'\n';
+        out<<"Command: "<<commandEnumToString(cmdResult.id)<<'\n';
+        if (cmdResult.arguments.size()){
+            out<<"Arguments: \n";
+            for (auto& arg:cmdResult.arguments){
+                out<<arg<<'\n';
+            }
+        }
+        if (cmdResult.options.size()){
+            out<<"Options:\n";
+            for (auto& option:cmdResult.options){
+                out<<option<<'\n';
+            }
         }
         return out;
     }
+}
+
+std::string cmd::commandResult::getStringArgumentValue(const std::string& argName) const {
+    for (auto& arg:arguments){
+        if (arg.name == argName){
+            if (arg.type != cmd::commandArgumentType::STR){
+                return "";
+            }
+            return arg.stringValue;
+        }
+    }
+    return "";
+}
+
+int cmd::commandResult::getNumberArgumentValue(const std::string& argName) const {
+    for (auto& arg:arguments){
+        if (arg.name == argName){
+            if (arg.type != cmd::commandArgumentType::NUM){
+                return NUM_ARG_MISSING;
+            }
+            return arg.numberValue;
+        }
+    }
+    return NUM_ARG_MISSING;
 }
 
 std::string cmd::commandResult::getStringOptionValue(const std::string& optionName) const{
@@ -198,6 +280,20 @@ bool cmd::commandResult::getBooleanOptionValue(const std::string& optionName) co
         }
     }
     return false;
+}
+
+// --------- commandArgument ----------------------------------------------------------------------------------//
+
+cmd::commandArgument::commandArgument(const std::string& argumentName, cmd::commandArgumentType argumentType) {
+    name = argumentName;
+    type = argumentType;
+}
+
+namespace cmd {
+    std::ostream& operator<<(std::ostream& out, const cmd::commandArgument& cmdArgument) {
+        out<<"arg:"<<cmdArgument.name;
+        return out;
+    }
 }
 
 // --------- commandOptionDefaultValue ----------------------------------------------------------------------------------//
@@ -273,6 +369,18 @@ cmd::commandInfo::commandInfo(commandId commandId, const char* commandName, cons
     description = std::string(commandDescription);
 }
 
+void cmd::commandInfo::addStringArgument(const char* argumentName) {
+    std::string name(argumentName);
+    cmd::commandArgumentType type = cmd::commandArgumentType::STR;
+    arguments.push_back(commandArgument(name, type));
+}
+
+void cmd::commandInfo::addNumberArgument(const char* argumentName) {
+    std::string name(argumentName);
+    cmd::commandArgumentType type = cmd::commandArgumentType::NUM;
+    arguments.push_back(commandArgument(name, type));
+}
+
 void cmd::commandInfo::addStringOption(const char* optionName, const char* defaultValue){
     std::string name(optionName);
     cmd::commandOption cmdOption(name);
@@ -305,7 +413,11 @@ void cmd::commandInfo::addBooleanOption(const char* optionName, bool defaultValu
 
 namespace cmd{
     std::ostream& operator<<(std::ostream& out, const cmd::commandInfo& cmdInfo){
-        out<<cmdInfo.name<<"\n\t--> "<<cmdInfo.description<<'\n';
+        out<<cmdInfo.name<<' ';
+        for (auto& arg:cmdInfo.arguments){
+            out<<arg<<' ';
+        }
+        out<<"\n\t--> "<<cmdInfo.description<<'\n';
         for (auto& option:cmdInfo.options){
             out<<option<<'\n';
         }
@@ -314,6 +426,35 @@ namespace cmd{
 }
 
 // --------- commandParser ----------------------------------------------------------------------------------//
+
+bool cmd::commandParser::parseArgument(char arguments[], int firstPos, int lastPos, int cmdIndex, int argumentIndex, cmd::commandResult& result) {
+    bool res = true;
+    char old = arguments[lastPos+1];
+    int numValue;
+    arguments[lastPos+1] = '\0';
+    cmd::argumentResult arg(commands[cmdIndex].arguments[argumentIndex]);
+    switch(arg.type){
+        case STR:
+            arg.setValue((void*)(arguments+firstPos));
+            break;
+        case NUM:
+            if (!((arguments[firstPos]>='0'&&arguments[firstPos]<='9')||
+                (arguments[firstPos]=='-'&&arguments[firstPos+1]>='0'&&arguments[firstPos+1]<='9'))){
+                res = false;
+            } else {
+                numValue = atoi(arguments+firstPos);
+                arg.setValue((void*)(&numValue));
+            }
+            break;
+        default:
+            break;
+    }
+    if (res){
+        result.arguments.push_back(arg);
+    }
+    arguments[lastPos+1] = old;
+    return res;
+}
 
 bool cmd::commandParser::parseAndCheckOptionValue(char arguments[], int startPos, int lastPos, const cmd::commandOption& opt, int position, cmd::commandResult& result){
     bool res = true;
@@ -401,22 +542,37 @@ cmd::commandResult cmd::commandParser::parse(const std::string& str){
 
     arguments = strtok(NULL, "");
 
+    int count = 0;
+
     int len = (arguments ? strlen(arguments) : 0), lastPos = 0;
     for (int i=0;i<len;++i){
         while (i<len && arguments[i] != ' '){
             ++i;
         }
 
-        if (!parseOption(arguments, lastPos, i-1, cmdIndex, result)){
-            result.id = cmd::commandId::WOCOPT;
-            result.clearOptions();
-            break;
+        if (count < commands[cmdIndex].arguments.size()){
+            if (!parseArgument(arguments, lastPos, i-1, cmdIndex, count, result)){
+                result.id = cmd::commandId::WARG;
+                result.clear();
+                break;
+            }
+        } else {
+            if (!parseOption(arguments, lastPos, i-1, cmdIndex, result)){
+                result.id = cmd::commandId::WOCOPT;
+                result.clear();
+                break;
+            }
         }
 
         while (i < len && arguments[i] == ' '){
             ++i;
         }
         lastPos = i;
+        ++count;
+    }
+    if (count < commands[cmdIndex].arguments.size() && result.id != cmd::commandId::WARG){
+        result.id = cmd::commandId::WCARG;
+        result.clear();
     }
     if (stringCmd){
         delete[] stringCmd;
@@ -427,6 +583,22 @@ cmd::commandResult cmd::commandParser::parse(const std::string& str){
 void cmd::commandParser::addCommand(commandId id, const char* commandName, const char* commandDescription){
     commandIndex[id] = commands.size();
     commands.push_back(cmd::commandInfo(id, commandName, commandDescription));
+}
+
+void cmd::commandParser::addCommandArgumentString(commandId id, const char* argumentName) {
+    if (!commandIndex.count(id)){
+        return;
+    }
+    int index = commandIndex[id];
+    commands[index].addStringArgument(argumentName);
+}
+
+void cmd::commandParser::addCommandArgumentNumber(commandId id, const char* argumentName) {
+    if (!commandIndex.count(id)){
+        return;
+    }
+    int index = commandIndex[id];
+    commands[index].addNumberArgument(argumentName);
 }
 
 void cmd::commandParser::addCommandOptionString(commandId id, const char* optionName, const char* defaultValue){

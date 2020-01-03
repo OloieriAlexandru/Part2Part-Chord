@@ -35,12 +35,15 @@ umap<std::string,std::vector<sharedFileInfo>>   sharedFiles;
 
 umap<std::string,std::vector<chordFileInfo>>    chordFiles;
 
+bool          chordIdIsTaken(const node& randomNode);
 void          joinChordNetwork();
 void          joinChordNetwork(const node& randomNode);
 void          initFingerTable(const node& randomNode);
 void          updateOthers();
 void          getFilesFromPredecessor();
+void          printWelcomeToChordMessage();
 void          leaveChordNetwork();
+void          removeMyFilesFromTheNetwork();
 void          moveFilesToSuccessor();
 void          updatePredecessorOfSuccessor();
 void          replaceMeInFingersTable();
@@ -85,6 +88,8 @@ void          serverUpdateFingerTable(const node& p, const node& nd, uint i);
 void          serverChordGetKeysFromPredecessor(int sd);
 void          serverAddFilesFromPredecessor(int sd);
 void          serverReplaceNodeFromFingersTable(int sd);
+uint          serverCountChordNodesRequest();
+void          serverCountChordNodes(int sd);
 
 void          serverChordStabilization(int sd);
 void          chordStabilizationNotify(const node& nd);
@@ -138,8 +143,9 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  shareFilesFromConfigFile();
   joinChordNetwork();
+  shareFilesFromConfigFile();
+  printWelcomeToChordMessage();
 
   if (pthread_create(&stabilizationThread, NULL, chordStabilization, NULL)){
     perror("[main]Error when creating a thread for the stabilization operations!");
@@ -167,7 +173,7 @@ bool check(int argc, char* argv[]){
     fprintf(stderr, "Invalid number of arguments, expected: 1 - the port of this server!\n");
     return false;
   }
-  if (!(argv[1][0] >= '0' && argv[1][0] <= '9') || strlen(argv[1]) > 4){
+  if (!(argv[1][0] >= '0' && argv[1][0] <= '9') || strlen(argv[1]) > 5){
     fprintf(stderr, "Invalid argument, expected: an integer - the port of this server!\n");
     return false;
   }
@@ -176,9 +182,23 @@ bool check(int argc, char* argv[]){
   while (argv[1][digitsNo] && argv[1][digitsNo] >= '0' && argv[1][digitsNo] <= '9'){
     info.me.port = info.me.port * 10 + (argv[1][digitsNo++] - '0');
   }
+  if (!(info.me.port < 1<<16)){
+    fprintf(stderr, "Invalid argument, expected: an integer - the port of this server!\n");
+    return false;
+  }
+  
   info.me.address = myAddress;
   std::string keyStr = info.me.address + std::to_string(info.me.port);
   info.me.key = getHash(keyStr.c_str());
+
+  if (info.me.port != 3500){
+    node firstNode = getFirstNodeInfo();
+    if (chordIdIsTaken(firstNode)){
+      printf("You were asign chord id %u, but this id already exists in the network! Please choose another port!\n", info.me.key);
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -200,13 +220,21 @@ void shareFilesFromConfigFile() {
   fileIn.close();
 }
 
+bool chordIdIsTaken(const node& randomNode) {
+  node succ = serverFindSucc(randomNode, info.me.key);
+  if (succ.key == info.me.key){
+    return true;
+  }
+  return false;
+}
+
 void joinChordNetwork() {
   initMyIntervals();
   if (isFirstChordNode(info.me.address, info.me.port)){
     initFirstChordNode();
   } else {
     node firstNode = getFirstNodeInfo();
-    joinChordNetwork(firstNode);
+    joinChordNetwork(firstNode); 
   }
 }
 
@@ -281,13 +309,32 @@ void getFilesFromPredecessor() {
   close(sd);
 }
 
+void printWelcomeToChordMessage() {
+  notifyMessage("You have successfully joined the Chord network!\n");
+  uint chordNodesCount = serverCountChordNodesRequest();
+  notifyMessage("Currently, there %s %u node%s in the network, and you were assigned id %u!\n", (chordNodesCount == 1 ? "is" : "are"), 
+    chordNodesCount, (chordNodesCount == 1 ? "" : "s"), info.me.key);
+  notifyMessage("To see a list of all the commands, type \"list-cmd\"!\n");
+}
+
 void leaveChordNetwork() {
   if (info.me == info.fTable.fingers[0]){
     return;
   }
+  removeMyFilesFromTheNetwork();
   moveFilesToSuccessor();
   updatePredecessorOfSuccessor();
   replaceMeInFingersTable();
+}
+
+void removeMyFilesFromTheNetwork() {
+  for (auto& bucket:sharedFiles){
+    for (auto& file:bucket.second){
+      if (!removeFileFromNetwork(file)){
+        printf("[!!!]Failed to remove one of my files from the network! (%s, %s)", file.name.c_str(), file.path.c_str());
+      }
+    }
+  }
 }
 
 void moveFilesToSuccessor() {
@@ -716,6 +763,7 @@ void serverRemoveFile(int sd) {
 node serverFindSucc(const node& nd, uint id) {
   int sd;
   if (!initClient(sd, nd.address.c_str(), nd.port)){
+    info.me.key = SHA_HASH_VAL;
     return info.me;
   }
 
@@ -1053,6 +1101,62 @@ void serverReplaceNodeFromFingersTable(int sd) {
   close(newSd);
 }
 
+uint serverCountChordNodesRequest() {
+  if (info.me == info.fTable.fingers[0]){
+    return 1;
+  }
+  uint response = 1, request = SRV_COUNT_NODES;
+  int sd;
+  if (!initClient(sd,info.fTable.fingers[0].address.c_str(),info.fTable.fingers[0].port)){
+    printf("[client]Failed to connect to my succesor in order to count the number of nodes in the network!\n");
+    return 0;
+  }
+  if (-1 == write(sd,&request,4) || !sendNodeInfo(sd,info.me) || -1 == write(sd,&response,4)){
+    printf("[client]Failed to sent protocol data to my successor for a \"countChordNodes\" operation!\n");
+    close(sd);
+    return 0;
+  }
+  if (-1 == read(sd,&response,4)){
+    printf("[client]Failed to read the number of nodes in the network!\n");
+    close(sd);
+    return 0;
+  }
+  close(sd);
+  return response;
+}
+
+void serverCountChordNodes(int sd) {
+  node nd;
+  uint response, request = SRV_COUNT_NODES;
+  if (!readNodeInfo(sd,nd) || -1 == read(sd,&response,4)){
+    printf("[server]Failed to read protocol data for a \"countChordNodes\" operation!\n");
+    return;
+  }
+  ++response;
+  if (nd != info.fTable.fingers[0]){
+    int newSd;
+    if (!initClient(newSd,info.fTable.fingers[0].address.c_str(),info.fTable.fingers[0].port)){
+      printf("[server]Failed to connect to my succesor in order to count the number of nodes in the network!\n");
+      return;
+    }
+    if (-1 == write(newSd,&request,4) || !sendNodeInfo(newSd,nd) || -1 == write(newSd,&response,4)){
+      printf("[server]Failed to sent protocol data to my successor for a \"countChordNodes\" operation!\n");
+      close(newSd);
+      return;
+    }
+    if (-1 == read(newSd,&response,4)){
+      printf("[server]Failed to read the number of nodes in the network!\n");
+      close(newSd);
+      return;
+    }
+    close(newSd);
+  }
+  if (-1 == write(sd,&response,4)){
+    printf("[server]Failed to send the number of nodes in the network to the client!\n");
+    return;
+  }
+}
+
 void serverChordStabilization(int sd) {
   node np;
   debugMessage("A node sent me a stabilization flag, I'm reading info about that node!\n");
@@ -1120,6 +1224,12 @@ static void* serverLogic(void *) {
 
   struct sockaddr_in from;
   int sd = createServer(), currentThreadIndex, client;
+
+  if (sd == errno) {
+    printf("Failed to create the server! Probably the chosen port is already used!\n");
+    exit(1);
+  }
+
   bool running = true;
 
   if (listen(sd, 20) == -1){
@@ -1228,6 +1338,9 @@ static void* treat(void* arg) {
     case SRV_NODE_LEFT:
       serverReplaceNodeFromFingersTable(sd);
       break;
+    case SRV_COUNT_NODES:
+      serverCountChordNodes(sd);
+      break;
     // Part2Part functionalities:
     case SRV_ADD_FILE:
       serverAddSharedFile(sd);
@@ -1265,9 +1378,9 @@ static void* treat(void* arg) {
 };
 
 void clientAddFileLogic(const cmd::commandResult& command) {
-  std::string fileName = command.getStringOptionValue("-name");
-  std::string filePath = command.getStringOptionValue("-path");
-  if (fileName == "none" || filePath == "none"){
+  std::string fileName = command.getStringArgumentValue("file-name");
+  std::string filePath = command.getStringArgumentValue("file-path");
+  if (fileName == "" || filePath == ""){
     printf("You have to specify the name and the path of the file! (-name and -path options)\n");
     return;
   }
@@ -1328,7 +1441,7 @@ void clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileNam
 }
 
 void clientSearchFileLogic(const cmd::commandResult& command) {
-  std::string fileName = command.getStringOptionValue("-name");
+  std::string fileName = command.getStringArgumentValue("file-name");
   if (fileName == "none") {
     printf("You have to specify the name and the path of the file! (-name option)\n");
     return;
@@ -1351,13 +1464,13 @@ void clientSearchFileLogic(const cmd::commandResult& command) {
 }
 
 void clientDownloadFileLogic(const cmd::commandResult& command) {
-  std::string fileName  = command.getStringOptionValue("-name");
-  if (fileName == "none"){
+  std::string fileName  = command.getStringArgumentValue("file-name");
+  if (fileName == ""){
     printf("[client]You have to specify the name of the file you want to download!\n");
     return;
   }
-  int fileId            = command.getNumberOptionValue("-id");
-  if (fileId == -1){
+  int fileId            = command.getNumberArgumentValue("file-id");
+  if (fileId == NUM_ARG_MISSING){
     printf("[client]You have to specify the id of the file you want to download!\n");
     return;
   }
@@ -1513,10 +1626,10 @@ void clientListFilesToDownloadLogic(const cmd::commandResult& command) {
 }
 
 void clientRemoveFileLogic(const cmd::commandResult& command) {
-  std::string fileName = command.getStringOptionValue("-name");
-  std::string filePath = command.getStringOptionValue("-path");
-  if (fileName == "none" || filePath == "none"){
-    printf("You have to specify the name and the path of the file you want to remove! (-name and -path options)\n");
+  std::string fileName = command.getStringArgumentValue("file-name");
+  std::string filePath = command.getStringArgumentValue("file-path");
+  if (fileName == "" || filePath == ""){
+    printf("You have to specify the name and the path of the file you want to remove!\n");
     return;
   }
   if (!sharedFiles.count(fileName)){
@@ -1546,13 +1659,21 @@ bool checkId(int id){
 }
 
 void printChordSucc(const cmd::commandResult& command) {
-  int id = command.getNumberOptionValue("-id");
+  int id = command.getNumberArgumentValue("id");
+  if (id == NUM_ARG_MISSING){
+    printf("You have to specify an id!\n");
+    return;
+  }
   node res = serverFindSucc(id);
   std::cout<<res<<'\n';
 }
 
 void printChordPred(const cmd::commandResult& command) {
-  int id = command.getNumberOptionValue("-id");
+  int id = command.getNumberArgumentValue("id");
+  if (id == NUM_ARG_MISSING){
+    printf("You have to specify an id!\n");
+    return;
+  }
   node res = serverFindPred(id);
   std::cout<<res<<'\n';
 }
@@ -1567,8 +1688,8 @@ bool initClient(int& sd, const char* ipAddress, int port) {
   client.sin_addr.s_addr = inet_addr(ipAddress);
   client.sin_port = htons (port);
   if (-1 == connect (sd, (struct sockaddr *) &client,sizeof (struct sockaddr))){
-    std::string errorMsg = std::string("[client]Error when connecting to peer!") + std::string(ipAddress) + std::string(", ") + std::to_string(port);
-    perror(errorMsg.c_str());
+    //std::string errorMsg = std::string("[client]Error when connecting to peer!") + std::string(ipAddress) + std::string(", ") + std::to_string(port);
+    //perror(errorMsg.c_str());
     close(sd);
     return false;
   }
@@ -1658,6 +1779,12 @@ bool executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& 
     case cmd::commandId::WOC:
       std::cout<<"Invalid command!\n";
       break;
+    case cmd::commandId::WARG:
+      std::cout<<"Invalid argument!\n";
+      break;
+    case cmd::commandId::WCARG:
+      std::cout<<"Too few arguments!\n";
+      break;
     case cmd::commandId::WOCOPT:
       std::cout<<"Invalid options for command!\n";
       break;
@@ -1669,21 +1796,21 @@ bool executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& 
 
 void initCmd(cmd::commandParser& parser){
   parser.addCommand(cmd::commandId::ADD_FILE, "add", "adds a file to the network");
-  parser.addCommandOptionString(cmd::commandId::ADD_FILE, "-name:<fileNameInChord>", "none");
-  parser.addCommandOptionString(cmd::commandId::ADD_FILE, "-path:<filePath>", "none");
+  parser.addCommandArgumentString(cmd::commandId::ADD_FILE, "file-name");
+  parser.addCommandArgumentString(cmd::commandId::ADD_FILE, "file-path");
 
   parser.addCommand(cmd::commandId::SEARCH_FILE, "search", "searches for a file in the network");
-  parser.addCommandOptionString(cmd::commandId::SEARCH_FILE, "-name:<fileName>", "none");
+  parser.addCommandArgumentString(cmd::commandId::SEARCH_FILE, "file-name");
 
   parser.addCommand(cmd::commandId::DOWNLOAD_FILE, "download", "downloads a file from a peer");
-  parser.addCommandOptionString(cmd::commandId::DOWNLOAD_FILE, "-name:<fileName>", "none");
+  parser.addCommandArgumentString(cmd::commandId::DOWNLOAD_FILE, "file-name");
+  parser.addCommandArgumentNumber(cmd::commandId::DOWNLOAD_FILE, "file-id");
   parser.addCommandOptionString(cmd::commandId::DOWNLOAD_FILE, "-ip:<peerIP>", "none");
-  parser.addCommandOptionNumber(cmd::commandId::DOWNLOAD_FILE, "-id:<fileId>", -1);
   parser.addCommandOptionNumber(cmd::commandId::DOWNLOAD_FILE, "-port:<peerPort>", -1);
 
   parser.addCommand(cmd::commandId::REMOVE_FILE, "rm", "removes a file from the network");
-  parser.addCommandOptionString(cmd::commandId::REMOVE_FILE, "-name:<fileNameInChord>", "none");
-  parser.addCommandOptionString(cmd::commandId::REMOVE_FILE, "-path:<filePath>", "none");
+  parser.addCommandArgumentString(cmd::commandId::REMOVE_FILE, "file-name");
+  parser.addCommandArgumentString(cmd::commandId::REMOVE_FILE, "file-path");
 
   parser.addCommand(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "list", "requests a peer to send information about all the file it shares");
   parser.addCommandOptionString(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "-ip:<peerIP>", "none");
@@ -1693,11 +1820,11 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommand(cmd::commandId::LIST_FILES, "list-files", "lists all my shared files");
 
   parser.addCommand(cmd::commandId::CONFIG_ADD_FILE, "config-add-file", "adds an entry to the auto-upload list file");
-  parser.addCommandOptionString(cmd::commandId::CONFIG_ADD_FILE, "-name:<fileName>", "none");
-  parser.addCommandOptionString(cmd::commandId::CONFIG_ADD_FILE, "-path:<filePath>", "none");
+  parser.addCommandArgumentString(cmd::commandId::CONFIG_ADD_FILE, "file-name");
+  parser.addCommandArgumentString(cmd::commandId::CONFIG_ADD_FILE, "file-path");
 
   parser.addCommand(cmd::commandId::CONFIG_REMOVE_FILE, "config-rm-file", "removes an entry from the auto-upload list file");
-  parser.addCommandOptionString(cmd::commandId::CONFIG_REMOVE_FILE, "-name:<fileName>", "none");
+  parser.addCommandArgumentString(cmd::commandId::CONFIG_REMOVE_FILE, "file-name");
 
   parser.addCommand(cmd::commandId::CONFIG_REMOVE_ALL, "config-rm-all", "removes all the entries from the auto-upload list file");
 
@@ -1711,10 +1838,10 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommand(cmd::commandId::CHORD_LIST, "chord-list", "prints all the files this chord node is responsible for");
 
   parser.addCommand(cmd::commandId::CHORD_SUCC, "chord-succ", "prints successor(id) in the Chord network");
-  parser.addCommandOptionNumber(cmd::commandId::CHORD_SUCC, "-id", -1);
+  parser.addCommandArgumentNumber(cmd::commandId::CHORD_SUCC, "id");
   
   parser.addCommand(cmd::commandId::CHORD_PRED, "chord-pred", "prints predecessor(id) in the Chord network");
-  parser.addCommandOptionNumber(cmd::commandId::CHORD_PRED, "-id", -1);
+  parser.addCommandArgumentNumber(cmd::commandId::CHORD_PRED, "id"); 
 
   parser.addCommand(cmd::commandId::CHORD_CLOCKWISE, "chord-clock", "prints the nodes in the Chord network in clockwise order");
   parser.addCommand(cmd::commandId::CHORD_CCLOCKWISE, "chord-cclock", "prints the nodes in the Chord network in counter-clockwise order");
@@ -1725,8 +1852,8 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommand(cmd::commandId::CLOSE, "close", "closes the application");
 
   parser.addCommand(cmd::commandId::CONCURRENT, "concurrent-server", "a command that can be used to show that the servers are concurrent");
-  parser.addCommandOptionString(cmd::commandId::CONCURRENT, "-ip:<peerIP>", "none");
-  parser.addCommandOptionNumber(cmd::commandId::CONCURRENT, "-port:<peerPort>", -1);
+  parser.addCommandArgumentString(cmd::commandId::CONCURRENT, "peer-ip");
+  parser.addCommandArgumentNumber(cmd::commandId::CONCURRENT, "peer-port");
 }
 
 void serverConcurrentFunction(int sd) {
@@ -1749,12 +1876,12 @@ void serverConcurrentFunction(int sd) {
 }
 
 void clientConcurrentFunction(const cmd::commandResult& command) {
-  int peerPort = command.getNumberOptionValue("-port");
+  int peerPort = command.getNumberArgumentValue("peer-port");
   if (peerPort == -1){
     printf("[client]You have to specify the port of the peer!\n");
     return;
   }
-  std::string peerIp = command.getStringOptionValue("-ip");
+  std::string peerIp = command.getStringArgumentValue("peer-ip");
   if (peerIp == "none"){
     printf("[client]You have to specify the ip of the peer!\n");
     return;

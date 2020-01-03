@@ -11,6 +11,15 @@ void debugMessage(const char* format, ...){
 	va_end(args);
 }
 
+void notifyMessage(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    printf("\033[1;36m");
+    vprintf(format, args);
+	va_end(args);
+    printf("\033[0m");
+}
+
 uint getHash(SHA1& sha1, const char *str){
     std::string hsh = sha1(str);
     uint res = 0, pw = 1, mul;
@@ -99,10 +108,10 @@ bool configFileInit() {
 }
 
 void configFileAddEntry(const cmd::commandResult& command) {
-    std::string fileName = command.getStringOptionValue("-name");
-    std::string filePath = command.getStringOptionValue("-path");
-    if (fileName == "none" || filePath == "none"){
-        printf("You have to specify the name and the path of the file! (-name and -path options)\n");
+    std::string fileName = command.getStringArgumentValue("file-name");
+    std::string filePath = command.getStringArgumentValue("file-path");
+    if (fileName == "" || filePath == ""){
+        printf("You have to specify the name and the path of the file!\n");
         return;
     }
     if (!fileExists(filePath.c_str())){
@@ -119,7 +128,7 @@ void configFileAddEntry(const cmd::commandResult& command) {
 }
 
 void configFileRemoveEntry(const cmd::commandResult& command) {
-    std::string fileName = command.getStringOptionValue("-name");
+    std::string fileName = command.getStringArgumentValue("file-name");
     if (fileName == "none"){
         printf("You have to specify the name of the file!\n");
         return;

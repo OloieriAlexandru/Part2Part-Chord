@@ -140,7 +140,16 @@
 //          uint                            - ownerAddressLen
 //          char[ownerAddressLen]           - ownerAddress
 //          uint                            - ownerPort
-#define     SRV_CONCURRENT                   255                    // ---
+#define     SRV_COUNT_NODES                 17                      // ---
+//          client:
+//          uint                            - nodeId
+//          uint                            - nodePort
+//          uint                            - nodeIpLen
+//          char[nodeIpLen]                 - nodeIp
+//          uint                            - currentCount
+//          server:
+//          uint                            - currentCount + 1
+#define     SRV_CONCURRENT                  255                     // ---
 //          client:
 //          uint                            - nodeId
 //          uint                            - nodePort

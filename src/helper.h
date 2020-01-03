@@ -23,6 +23,7 @@ struct  threadInfo {
 };
 
 void    debugMessage(const char* format, ...);
+void    notifyMessage(const char* format, ...);
 
 uint    getHash(SHA1& sha1, const char* str);
 uint    getCustomHash(const char* str);
