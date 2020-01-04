@@ -32,6 +32,7 @@ void          shareFilesFromConfigFile();
 
 nodeInfo                                        info;
 umap<std::string,std::vector<sharedFileInfo>>   sharedFiles;
+std::vector<std::string>                        fileCategories;
 
 umap<std::string,std::vector<chordFileInfo>>    chordFiles;
 
@@ -55,7 +56,7 @@ uint          addFileToNetworkToPeer(const node& nd, const sharedFileInfo& file)
 bool          addFileToNetwork(const sharedFileInfo& file);
 uint          removeFileFromNetworkFromPeer(const node& nd, const sharedFileInfo file);
 bool          removeFileFromNetwork(const sharedFileInfo& file);
-void          shareFile(const std::string& name, const std::string& path, bool atInit = false);
+void          shareFile(const std::string& name, const std::string& path, const std::string& description, const std::string& category, bool atInit = false);
 void          listSharedFiles();
 
 void          serverSendErrorFlag(int sd);
@@ -132,6 +133,8 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
+  initFileSharingInfo();
+  
   if (!configFileInit()) {
     fprintf(stderr, "[main]Error when creating/checking the config file!");
     return 1;
@@ -144,8 +147,8 @@ int main(int argc, char* argv[]) {
   }
 
   joinChordNetwork();
-  shareFilesFromConfigFile();
   printWelcomeToChordMessage();
+  shareFilesFromConfigFile();
 
   if (pthread_create(&stabilizationThread, NULL, chordStabilization, NULL)){
     perror("[main]Error when creating a thread for the stabilization operations!");
@@ -212,10 +215,16 @@ void shareFilesFromConfigFile() {
     return;
   }
   int autoAdd;
-  std::string name, path;
+  std::string name, path, description, category;
   fileIn >> autoAdd;
   while (fileIn >> name >> path){
-    shareFile(name, path, true);
+    readConfigFileDescription(fileIn, description);
+    fileIn >> category;
+    if (description == fileEmptyDescription){
+      description.clear();
+    }
+    notifyMessage("File %s: ", name.c_str());
+    shareFile(name, path, description, category, true);
   }
   fileIn.close();
 }
@@ -409,7 +418,7 @@ uint getHash(const char* str) {
 uint addFileToNetworkToPeer(const node& nd, const sharedFileInfo& file) {
   uint response;
   if (info.me == nd){
-    chordFileInfo newFile(file.name, file.shaHash, file.customHash, nd.address, nd.port);
+    chordFileInfo newFile(file.name, file.description, file.category, file.size, file.shaHash, file.customHash, nd.address, nd.port);
     response = serverAddSharedFileLogic(newFile);
   } else {
     int sd;
@@ -504,7 +513,7 @@ bool removeFileFromNetwork(const sharedFileInfo& file) {
   return (response == SRV_REMOVE_FILE_OK_REMOVED);
 }
 
-void shareFile(const std::string& name, const std::string& path, bool atInit) {
+void shareFile(const std::string& name, const std::string& path, const std::string& description, const std::string& category, bool atInit) {
   if (!fileExists(path.c_str())) {
     if (!atInit){
       std::cout<<"Invalid path! The file doesn't exist!\n";
@@ -513,7 +522,27 @@ void shareFile(const std::string& name, const std::string& path, bool atInit) {
     }
     return;
   }
-  sharedFileInfo newFile(sharedFileInfo(name, path, getCustomHash(path.c_str()), getHash(name.c_str())));
+  if (description.size() > FILE_DESC_MAX_LEN) {
+    if (!atInit){
+      std::cout<<"The description is too long! Max number of characters: "<<FILE_DESC_MAX_LEN<<"!\n";
+      return;
+    } else {
+      std::cout<<"The description for file "<<path<<" is too long! Max number of characters: "<<FILE_DESC_MAX_LEN<<"!\n";
+      return;
+    }
+  }
+  uchar categoryId = getCategoryId(category);
+  if (isAnInvalidCategory(categoryId)){
+    if (!atInit){
+      std::cout<<"Invalid file category!\n";
+      return;
+    } else {
+      std::cout<<"The category for file"<<path<<" is invalid!\n";
+      return;
+    }
+  }
+  uint size = getFileSize(path.c_str());
+  sharedFileInfo newFile(sharedFileInfo(name, path, description, categoryId, size, getCustomHash(path.c_str()), getHash(name.c_str())));
   if (addFileToNetwork(newFile)){
       sharedFiles[name].push_back(newFile);
   }
@@ -721,8 +750,15 @@ void serverSearchFiles(int sd) {
   if (!filesCount){
     return;
   }
+  uint fileAddressLen, fileDescriptionLen;
   for (int i=0;i<filesCount;++i){
-    uint fileAddressLen = chordFiles[fileName][i].address.size();
+    fileAddressLen = chordFiles[fileName][i].address.size();
+    fileDescriptionLen = chordFiles[fileName][i].description.size();
+    if (-1 == write(sd,&fileDescriptionLen,4) || -1 == write(sd,chordFiles[fileName][i].description.c_str(),fileDescriptionLen)
+      || -1 == write(sd,&chordFiles[fileName][i].category,1) || -1 == write(sd,&chordFiles[fileName][i].size,4)){
+      printf("Failed to send back information about the %d th found file!\n", i+1);
+      return;
+    }
     if (-1 == write(sd,&chordFiles[fileName][i].id,4) || -1 == write(sd,&fileAddressLen,4) 
       || -1 == write(sd,chordFiles[fileName][i].address.c_str(),fileAddressLen) || -1 == write(sd,&chordFiles[fileName][i].port,4)) {
       printf("Failed to send back information about the %d th found file!\n", i+1);
@@ -1384,7 +1420,13 @@ void clientAddFileLogic(const cmd::commandResult& command) {
     printf("You have to specify the name and the path of the file! (-name and -path options)\n");
     return;
   }
-  shareFile(fileName, filePath);
+  std::string fileDescription = command.getStringOptionValue("-description");
+  if (fileDescription.size() > FILE_DESC_MAX_LEN){
+    printf("The file description is too long! Max. number of characters: %d\n", FILE_DESC_MAX_LEN);
+    return;
+  }
+  std::string fileCategory = command.getStringOptionValue("-category");
+  shareFile(fileName, filePath, fileDescription, fileCategory);
 }
 
 void clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileName){
@@ -1393,8 +1435,9 @@ void clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileNam
     return;
   }
   uint request = SRV_SEARCH_FILE, fileNameLen = fileName.size(), filesCount;
-  uint fileId, fileOwnerPort, fileOwnerIpLen;
-  std::string fileOwnerIp;
+  uint fileId, fileOwnerPort, fileOwnerIpLen, fileSize, fileDescriptionLen;
+  uchar fileCategory;
+  std::string fileDescription, fileOwnerIp, fileCategoryStr;
   if (-1 == write(sd,&request,4) || -1 == write(sd,&fileNameLen,4) || -1 == write(sd,fileName.c_str(),fileNameLen)){
     close(sd);
     printf("Error when sending protocol data to the peer that stores information about the searched files!\n");
@@ -1412,6 +1455,29 @@ void clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileNam
   }
   printf("There are %d files in the network with the specified name: \n", filesCount);
   for (int i=0;i<filesCount;++i){
+    if (-1 == read(sd,&fileDescriptionLen,4)){
+      close(sd);
+      printf("Error when reading the %d th file description length!\n", i+1);
+      return;
+    }
+    fileDescription.resize(fileDescriptionLen);
+    for (int j=0;j<fileDescriptionLen;++j){
+      if (-1 == read(sd,&fileDescription[j],1)){
+        printf("Error when reading the %d th byte of the %d th file's description!\n", j+1, i+1);
+        close(sd);
+        return;
+      }
+    }
+    if (-1 == read(sd,&fileCategory,1)){
+      printf("Error when reading the category of the %d th file!\n", i+1);
+      close(sd);
+      return;
+    }
+    if (-1 == read(sd,&fileSize,4)){
+      printf("Error when reading the size of the %d th file!\n", i+1);
+      close(sd);
+      return;
+    }
     if (-1 == read(sd,&fileId,4)){
       close(sd);
       printf("Error when reading the %d th file id!\n", i+1);
@@ -1435,13 +1501,19 @@ void clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileNam
       printf("Error when reading the port of the %d th file's owner!\n",i+1);
       return;
     }
-    printf("%d. Name: %s, id: %d, address: %s, port: %d\n", (i+1), fileName.c_str(), fileId, fileOwnerIp.c_str(), fileOwnerPort);
+    if (isAnInvalidCategory(fileCategory)){
+      fileCategoryStr = std::string("error");
+    } else {
+      fileCategoryStr = getCategoryString(fileCategory);
+    }
+    printf("%d. Name: %s, description: \"%s\", category: %s, size: %d, id: %d, address: %s, port: %d\n", 
+      (i+1), fileName.c_str(), fileDescription.c_str(), fileCategoryStr.c_str(), fileSize, fileId, fileOwnerIp.c_str(), fileOwnerPort);
   }
   close(sd);
 }
 
 void clientSearchFileLogic(const cmd::commandResult& command) {
-  std::string fileName = command.getStringArgumentValue("file-name");
+  std::string fileName = command.getStringArgumentValue("file-name"), categoryStr;
   if (fileName == "none") {
     printf("You have to specify the name and the path of the file! (-name option)\n");
     return;
@@ -1455,7 +1527,10 @@ void clientSearchFileLogic(const cmd::commandResult& command) {
     } else {
       printf("There are %d files in the network with the specified name: \n", filesCount);
       for (int i=0;i<filesCount;++i){
-        printf("%d. Name: %s, id: %d, address: %s, port: %d\n", (i+1), fileName.c_str(), chordFiles[fileName][i].id, chordFiles[fileName][i].address.c_str(), chordFiles[fileName][i].port);
+        categoryStr = getCategoryString(chordFiles[fileName][i].category);
+        printf("%d. Name: %s, description: \"%s\", category: %s, size: %d, id: %d, address: %s, port: %d\n", 
+          (i+1), fileName.c_str(), chordFiles[fileName][i].description.c_str(), categoryStr.c_str(), 
+          chordFiles[fileName][i].size, chordFiles[fileName][i].id, chordFiles[fileName][i].address.c_str(), chordFiles[fileName][i].port);
       }
     }
   } else {
@@ -1591,7 +1666,7 @@ void clientListFilesToDownloadLogic(const cmd::commandResult& command) {
   }
 
   if (filesNumber){
-    printf("The peer shares %d files", filesNumber);
+    printf("The peer shares %d file%s", filesNumber, (filesNumber == 1 ? "" : "s"));
     if (fileNameLen){
       printf(" that match the file name you entered");
     }
@@ -1703,7 +1778,7 @@ void clientLogic() {
   initCmd(parser);
 
   while (clientRunning){
-    std::cout<<"node"<<info.me.key<<"@chord: ";
+    notifyMessage("node%u@chord: ", info.me.key);
     std::string inputLine;
     std::getline(std::cin,inputLine);
 
@@ -1731,6 +1806,9 @@ bool executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& 
       break;
     case cmd::commandId::LIST_FILES:
       listSharedFiles();
+      break;
+    case cmd::commandId::LIST_CATEGORIES:
+      printFileCategories(command);
       break;
     case cmd::commandId::CONFIG_ADD_FILE:
       configFileAddEntry(command);
@@ -1798,6 +1876,8 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommand(cmd::commandId::ADD_FILE, "add", "adds a file to the network");
   parser.addCommandArgumentString(cmd::commandId::ADD_FILE, "file-name");
   parser.addCommandArgumentString(cmd::commandId::ADD_FILE, "file-path");
+  parser.addCommandOptionString(cmd::commandId::ADD_FILE, "-description:<fileDescripton>", "");
+  parser.addCommandOptionString(cmd::commandId::ADD_FILE, "-category:<fileCategory>", "");
 
   parser.addCommand(cmd::commandId::SEARCH_FILE, "search", "searches for a file in the network");
   parser.addCommandArgumentString(cmd::commandId::SEARCH_FILE, "file-name");
@@ -1818,10 +1898,13 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommandOptionNumber(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "-port:<peerPort>", -1);
 
   parser.addCommand(cmd::commandId::LIST_FILES, "list-files", "lists all my shared files");
+  parser.addCommand(cmd::commandId::LIST_CATEGORIES, "list-categories", "lists the available file categories");
 
   parser.addCommand(cmd::commandId::CONFIG_ADD_FILE, "config-add-file", "adds an entry to the auto-upload list file");
   parser.addCommandArgumentString(cmd::commandId::CONFIG_ADD_FILE, "file-name");
   parser.addCommandArgumentString(cmd::commandId::CONFIG_ADD_FILE, "file-path");
+  parser.addCommandOptionString(cmd::commandId::CONFIG_ADD_FILE, "-description:<fileDescripton>", "");
+  parser.addCommandOptionString(cmd::commandId::CONFIG_ADD_FILE, "-category:<fileCategory>", "");
 
   parser.addCommand(cmd::commandId::CONFIG_REMOVE_FILE, "config-rm-file", "removes an entry from the auto-upload list file");
   parser.addCommandArgumentString(cmd::commandId::CONFIG_REMOVE_FILE, "file-name");

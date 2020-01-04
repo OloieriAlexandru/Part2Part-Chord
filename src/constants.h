@@ -18,6 +18,8 @@
 #define PACKAGE_SIZE        1024u
 #define CHORD_FIRST_PORT    3500
 
+#define FILE_DESC_MAX_LEN   100
+
 #define uchar   unsigned char
 #define uint    unsigned int
 #define ulld    unsigned long long
@@ -27,5 +29,6 @@ const char* const userDownloadsFolder       = "downloads/";
 const char* const userDownloadsExtension    = ".txt";
 
 const std::string myAddress                 = "127.0.0.1";
+const std::string fileEmptyDescription      = "none";
 
 #endif // CONSTANTS_H

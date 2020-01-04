@@ -6,15 +6,16 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdarg.h>
+
 #include <fstream>
 #include <string>
 #include <iostream>
+#include <vector>
 
 #include "hash/sha1.h"
 
 #include "constants.h"
 #include "command-line.h"
-
 #include "chord.h"
 
 struct  threadInfo {
@@ -22,8 +23,18 @@ struct  threadInfo {
     int threadNo;
 };
 
+extern std::vector<std::string> fileCategories;
+
 void    debugMessage(const char* format, ...);
 void    notifyMessage(const char* format, ...);
+
+void        initFileSharingInfo();
+bool        isAnInvalidCategory(const std::string& commandName);
+bool        isAnInvalidCategory(uchar categoryId);
+uchar       getCategoryId(const std::string& commandName);
+std::string getCategoryString(uchar categoryId);
+std::string getGeneralCategory();
+void        printFileCategories(const cmd::commandResult& command);
 
 uint    getHash(SHA1& sha1, const char* str);
 uint    getCustomHash(const char* str);
@@ -32,13 +43,14 @@ uint    getFileSize(const char* filePath);
 bool    fileCreate(const char* fileName);
 bool    fileExists(const char* filePath);
 
-bool    configFileGetFlagValue();
-bool    configFileExists();
-bool    configFileInitInfo();
-bool    configFileCreate();
-bool    configFileInit();
-bool    configFileAddEntry(const std::string& fileName, const std::string& filePath);
-bool    configFileRemoveEntry(const std::string& fileName);
+void        readConfigFileDescription(std::ifstream& fileIn, std::string& description);
+bool        configFileGetFlagValue();
+bool        configFileExists();
+bool        configFileInitInfo();
+bool        configFileCreate();
+bool        configFileInit();
+bool        configFileAddEntry(const std::string& fileName, const std::string& filePath);
+bool        configFileRemoveEntry(const std::string& fileName);
 
 void    configFileAddEntry(const cmd::commandResult& command);
 void    configFileRemoveEntry(const cmd::commandResult& command);

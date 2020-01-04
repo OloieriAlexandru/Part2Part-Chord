@@ -38,6 +38,10 @@
 //          client:
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
+//          uint                            - fileDescriptionLen
+//          char[fileDescriptionLen]        - fileDescription
+//          uchar                           - fileCategory
+//          uint                            - fileSize
 //          uint                            - fileChordId
 //          uint                            - fileId
 //          uint                            - ownerAddressLen
@@ -81,6 +85,10 @@
 //          server:
 //          uint                            - numberOfFiles
 //          numberOfFiles times:
+//          uint                            - fileDescriptionLen
+//          char[fileDescriptionLen]        - fileDescription
+//          uchar                           - fileCategory
+//          uint                            - fileSize
 //          uint                            - fileId
 //          uint                            - fileOwnerIpLen
 //          char[fileIpLen]                 - fileOwnerIp
@@ -89,6 +97,10 @@
 //          client:
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
+//          uint                            - fileDescriptionLen
+//          char[fileDescriptionLen]        - fileDescription
+//          uchar                           - fileCategory
+//          uint                            - fileSize
 //          uint                            - fileChordId
 //          uint                            - fileId
 //          uint                            - ownerAddressLen
@@ -107,6 +119,10 @@
 //          numberOfFiles times:
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
+//          uint                            - fileDescriptionLen
+//          char[fileDescriptionLen]        - fileDescription
+//          uchar                           - fileCategory
+//          uint                            - fileSize
 //          uint                            - fileChordId
 //          uint                            - fileId
 //          uint                            - ownerAddressLen
@@ -135,6 +151,10 @@
 //          numberOfFiles times:
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
+//          uint                            - fileDescriptionLen
+//          char[fileDescriptionLen]        - fileDescription
+//          uchar                           - fileCategory
+//          uint                            - fileSize
 //          uint                            - fileChordId
 //          uint                            - fileId
 //          uint                            - ownerAddressLen

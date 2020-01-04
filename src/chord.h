@@ -53,6 +53,9 @@ extern node     serverFindPred(uint id);
 struct sharedFileInfo {
     std::string name;
     std::string path;
+    std::string description;
+    uchar       category;
+    uint        size;
     uint        shaHash, customHash;
     sharedFileInfo(const std::string& fileName, const std::string& filePath, uint h1 = 0, uint h2 = 0){
         name = fileName;
@@ -60,11 +63,23 @@ struct sharedFileInfo {
         customHash = h1;
         shaHash = h2;
     }
+    sharedFileInfo(const std::string& fileName, const std::string& filePath, const std::string& desc, uchar categ, uint sz, uint h1 = 0, uint h2 = 0){
+        name = fileName;
+        path = filePath;
+        description = desc;
+        category = categ;
+        size = sz;
+        customHash = h1;
+        shaHash = h2;    
+    }
     friend std::ostream& operator<<(std::ostream& out, const sharedFileInfo& file);
 };
 
 struct chordFileInfo {
     std::string name;
+    std::string description;
+    uchar       category;
+    uint        size;
     uint        chordId;    // shaHash
     uint        id;         // customHash
     std::string address;    // owner adderss
@@ -72,6 +87,19 @@ struct chordFileInfo {
     chordFileInfo() { }
     chordFileInfo(const std::string& fileName, uint chordFileId, uint fileId, const std::string& ownerAddress, uint ownerPort){
         name = fileName;
+        description = "";
+        category = 0;
+        size = 0;
+        chordId = chordFileId;
+        id = fileId;
+        address = ownerAddress;
+        port = ownerPort;
+    }
+    chordFileInfo(const std::string& fileName, const std::string& desc, uchar categ, uint sz, uint chordFileId, uint fileId, const std::string& ownerAddress, uint ownerPort){
+        name = fileName;
+        description = desc;
+        category = categ;
+        size = sz;
         chordId = chordFileId;
         id = fileId;
         address = ownerAddress;
@@ -96,10 +124,12 @@ bool    sendNodeInfo(int sd, const node& nd);
 bool    readNodeInfo(int sd, uint& key, uint& port, std::string& address);
 bool    readNodeInfo(int sd, node& nd);
 
-bool    sendChordFileInfo(int sd, const std::string& fileName, const uint chordFileId, const uint fileId, const std::string& ownerAddress, const uint ownerPort);
+bool    sendChordFileInfo(int sd, const std::string& fileName, const std::string& fileDescription, 
+    const uchar fileCategory, const uint fileSize, const uint chordFileId, const uint fileId, const std::string& ownerAddress, const uint ownerPort);
 bool    sendChordFileInfo(int sd, const sharedFileInfo& file);
 bool    sendChordFileInfo(int sd, const chordFileInfo& file);
-bool    readChordFileInfo(int sd, std::string& fileName, uint& chordFileId, uint& fileId, std::string& ownerAddress, uint& ownerPort);
+bool    readChordFileInfo(int sd, std::string& fileName, std::string& fileDescription, 
+    uchar& fileCategory, uint& fileSize, uint& chordFileId, uint& fileId, std::string& ownerAddress, uint& ownerPort);
 bool    readChordFileInfo(int sd, chordFileInfo& fileInfo);
 
 bool    getNodesInClockwiseOrder(std::vector<int>& clock);

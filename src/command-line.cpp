@@ -14,6 +14,8 @@ std::string cmd::commandEnumToString(cmd::commandId cmdId){
             return "list";
         case cmd::commandId::LIST_FILES:
             return "list-files";
+        case cmd::commandId::LIST_CATEGORIES:
+            return "list-categories";
         case cmd::commandId::CONFIG_ADD_FILE:
             return "config-add-file";
         case cmd::commandId::CONFIG_REMOVE_FILE:
@@ -427,15 +429,31 @@ namespace cmd{
 
 // --------- commandParser ----------------------------------------------------------------------------------//
 
-bool cmd::commandParser::parseArgument(char arguments[], int firstPos, int lastPos, int cmdIndex, int argumentIndex, cmd::commandResult& result) {
+bool cmd::commandParser::parseArgument(char arguments[], int firstPos, int& lastPos, int cmdIndex, int argumentIndex, cmd::commandResult& result) {
     bool res = true;
     char old = arguments[lastPos+1];
     int numValue;
-    arguments[lastPos+1] = '\0';
     cmd::argumentResult arg(commands[cmdIndex].arguments[argumentIndex]);
+    if (arg.type == STR){
+        if (arguments[firstPos] == '\"'){
+            while (arguments[lastPos] && arguments[lastPos] != '\"'){
+                ++lastPos;
+            }
+            if (arguments[lastPos] != '\"'){
+                return false;
+            }
+        }
+    }
+    arguments[lastPos+1] = '\0';
     switch(arg.type){
         case STR:
-            arg.setValue((void*)(arguments+firstPos));
+            if (arguments[firstPos] == '\"'){
+                arguments[lastPos] = '\0';
+                arg.setValue((void*)(arguments+firstPos+1));
+                arguments[lastPos] = '\"';
+            } else {
+                arg.setValue((void*)(arguments+firstPos));
+            }
             break;
         case NUM:
             if (!((arguments[firstPos]>='0'&&arguments[firstPos]<='9')||
@@ -456,10 +474,20 @@ bool cmd::commandParser::parseArgument(char arguments[], int firstPos, int lastP
     return res;
 }
 
-bool cmd::commandParser::parseAndCheckOptionValue(char arguments[], int startPos, int lastPos, const cmd::commandOption& opt, int position, cmd::commandResult& result){
+bool cmd::commandParser::parseAndCheckOptionValue(char arguments[], int startPos, int& lastPos, const cmd::commandOption& opt, int position, cmd::commandResult& result){
     bool res = true;
     char old = arguments[lastPos+1];
     int numValue;
+    if (opt.type == STRING){
+        if (arguments[startPos] == ':' && arguments[startPos+1] == '\"'){
+            while (arguments[lastPos] && arguments[lastPos] != '\"'){
+                ++lastPos;
+            }
+            if (arguments[lastPos] != '\"'){
+                return false;
+            }
+        }
+    }
     std::string currentOptionName = opt.name.substr(0,position);
     arguments[lastPos+1] = '\0';
     switch (opt.type){
@@ -467,7 +495,13 @@ bool cmd::commandParser::parseAndCheckOptionValue(char arguments[], int startPos
             if (arguments[startPos]!=':' || !arguments[startPos+1]){
                 res = false;
             } else {
-                result.updateOption(currentOptionName, (void*)(arguments+startPos+1));
+                if (arguments[startPos+1] == '\"'){
+                    arguments[lastPos] = '\0';
+                    result.updateOption(currentOptionName, (void*)(arguments+startPos+2));
+                    arguments[lastPos] = '\"';
+                } else {
+                    result.updateOption(currentOptionName, (void*)(arguments+startPos+1));
+                }
             }
             break;
         case NUMBER:
@@ -488,7 +522,7 @@ bool cmd::commandParser::parseAndCheckOptionValue(char arguments[], int startPos
     return res;
 }
 
-bool cmd::commandParser::parseOption(char arguments[], int firstPos, int lastPos, int cmdIndex, cmd::commandResult& result){
+bool cmd::commandParser::parseOption(char arguments[], int firstPos, int& lastPos, int cmdIndex, cmd::commandResult& result){
     if (cmdIndex >= commands.size() || cmdIndex < 0){
         return false;
     }
@@ -550,19 +584,21 @@ cmd::commandResult cmd::commandParser::parse(const std::string& str){
             ++i;
         }
 
+        --i;
         if (count < commands[cmdIndex].arguments.size()){
-            if (!parseArgument(arguments, lastPos, i-1, cmdIndex, count, result)){
+            if (!parseArgument(arguments, lastPos, i, cmdIndex, count, result)){
                 result.id = cmd::commandId::WARG;
                 result.clear();
                 break;
             }
         } else {
-            if (!parseOption(arguments, lastPos, i-1, cmdIndex, result)){
+            if (!parseOption(arguments, lastPos, i, cmdIndex, result)){
                 result.id = cmd::commandId::WOCOPT;
                 result.clear();
                 break;
             }
         }
+        ++i;
 
         while (i < len && arguments[i] == ' '){
             ++i;

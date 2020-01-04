@@ -20,6 +20,55 @@ void notifyMessage(const char* format, ...) {
     printf("\033[0m");
 }
 
+void initFileSharingInfo() {
+    fileCategories.push_back(std::string("any"));
+    fileCategories.push_back(std::string("text"));
+    fileCategories.push_back(std::string("image"));
+    fileCategories.push_back(std::string("code"));
+    fileCategories.push_back(std::string("video"));
+    fileCategories.push_back(std::string("program"));
+    fileCategories.push_back(std::string("audio"));
+    fileCategories.push_back(std::string("binary"));
+}
+
+bool isAnInvalidCategory(const std::string& commandName){
+    return isAnInvalidCategory(getCategoryId(commandName));
+}
+
+bool isAnInvalidCategory(uchar categoryId) {
+    return categoryId == fileCategories.size();
+}
+
+uchar getCategoryId(const std::string& commandName) {
+    if (!commandName.size()){
+        return (uchar)0;
+    }
+    for (int i=0;i<fileCategories.size();++i){
+        if (commandName == fileCategories[i]){
+            return (uchar)i;
+        }
+    }
+    return (uchar)fileCategories.size();
+}
+
+std::string getGeneralCategory(){
+    return fileCategories[0];
+}
+
+std::string getCategoryString(uchar categoryId) {
+    if (categoryId < fileCategories.size()){
+        return fileCategories[(int)categoryId];
+    }
+    return "invalid";
+}
+
+void printFileCategories(const cmd::commandResult& command){
+    printf("There are %d file categories:\n", (int)fileCategories.size()-1);
+    for (int i=1;i<fileCategories.size();++i){
+        printf("%d. %s\n", i, fileCategories[i].c_str());
+    }
+}
+
 uint getHash(SHA1& sha1, const char *str){
     std::string hsh = sha1(str);
     uint res = 0, pw = 1, mul;
@@ -63,6 +112,16 @@ bool fileExists(const char* filePath) {
         return false;
     }
     return true;
+}
+
+void readConfigFileDescription(std::ifstream& fileIn, std::string& description) {
+    int descLen;
+    fileIn >> descLen;
+    fileIn.get();
+    description.resize(descLen);
+    for (int i=0;i<descLen;++i){
+        description[i] = fileIn.get();
+    }
 }
 
 bool configFileGetFlagValue() {
@@ -118,12 +177,28 @@ void configFileAddEntry(const cmd::commandResult& command) {
         printf("The file doesn't exist!\n");
         return;
     }
+    std::string description = command.getStringOptionValue("-description");
+    if (description.size() > FILE_DESC_MAX_LEN){
+        std::cout<<"The description is too long! Max characters allowed: "<<FILE_DESC_MAX_LEN<<"!\n";
+        return;
+    }
+    std::string category = command.getStringOptionValue("-category");
+    if (isAnInvalidCategory(category)){
+        std::cout<<"Invalid category!\n";
+        return;
+    }
     std::ofstream fileOut(userConfigFilePath, std::fstream::app);
     if (!fileOut.is_open()){
         printf("Error when opening the config file for reading!\n");
         return;
     }
-    fileOut<<fileName<<' '<<filePath<<'\n';
+    if (description == ""){
+        description = fileEmptyDescription;
+    }
+    if (category == ""){
+        category = getGeneralCategory();
+    }
+    fileOut<<fileName<<' '<<filePath<<' '<< description.size() << ' ' << description<<' '<<category<<'\n';
     fileOut.close();
 }
 
@@ -133,8 +208,8 @@ void configFileRemoveEntry(const cmd::commandResult& command) {
         printf("You have to specify the name of the file!\n");
         return;
     }
-    std::string name, path;
-    std::vector<std::pair<std::string,std::string>> entries;
+    std::string name, path, description, category;
+    std::vector<std::pair<std::pair<std::string,std::string>, std::pair<std::string,std::string>>> entries;
     int autoAdd;
     std::ifstream fileIn(userConfigFilePath);
     if (!fileIn.is_open()){
@@ -143,8 +218,10 @@ void configFileRemoveEntry(const cmd::commandResult& command) {
     }
     fileIn >> autoAdd;
     while (fileIn >> name >> path){
+        readConfigFileDescription(fileIn, description);
+        fileIn >> category;
         if (name != fileName){
-            entries.push_back(make_pair(name, path));
+            entries.push_back(make_pair(make_pair(name, path),make_pair(description, category)));
         }
     }
     fileIn.close();
@@ -155,7 +232,7 @@ void configFileRemoveEntry(const cmd::commandResult& command) {
     }
     fileOut<<autoAdd<<'\n';
     for (int i=0;i<entries.size();++i){
-        fileOut << entries[i].first<< ' ' << entries[i].second<<'\n';
+        fileOut << entries[i].first.first<< ' ' << entries[i].first.second<<' '<< entries[i].second.first << ' ' << entries[i].second.second <<'\n';
     }
     fileOut.close();
 }
@@ -185,10 +262,12 @@ void configFileListAll(const cmd::commandResult& command) {
         return;
     }
     int autoAdd, index = 1;
-    std::string name, path;
+    std::string name, path, description, category;
     fileIn >> autoAdd;
     while (fileIn >> name >> path){
-        std::cout << index++ << ". " << name << ' ' << path<<'\n';
+        readConfigFileDescription(fileIn, description);
+        fileIn >> category;
+        std::cout << index++ << ". " << "Name: " << name << ", path: " << path << ", description: \"" << description << "\", category: " << category <<'\n';
     }
     fileIn.close();
 }

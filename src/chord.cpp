@@ -147,9 +147,12 @@ bool readNodeInfo(int sd, node& nd) {
     return readNodeInfo(sd, nd.key, nd.port, nd.address);
 }
 
-bool sendChordFileInfo(int sd, const std::string& fileName, const uint chordFileId, const uint fileId, const std::string& ownerAddress, const uint ownerPort) {
-    uint len = fileName.size();
-    if (-1 == write(sd,&len,4) || -1 == write(sd,fileName.c_str(),len) || -1 == write(sd,&chordFileId,4) || -1 == write(sd,&fileId,4)) {
+bool sendChordFileInfo(int sd, const std::string& fileName, const std::string& fileDescription, 
+        const uchar fileCategory, const uint fileSize, const uint chordFileId, const uint fileId, const std::string& ownerAddress, const uint ownerPort) {
+    uint len = fileName.size(), descLen = fileDescription.size();
+    if (-1 == write(sd,&len,4) || -1 == write(sd,fileName.c_str(),len) ||  -1 == write(sd,&descLen,4) || -1 == write(sd,fileDescription.c_str(),descLen) 
+        || -1 == write(sd,&fileCategory,1) || -1 == write(sd,&fileSize,4)
+        || -1 == write(sd,&chordFileId,4) || -1 == write(sd,&fileId,4)) {
         printf("[server]Error when sending info about a shared file to a peer!\n");
         return false;
     }
@@ -162,14 +165,15 @@ bool sendChordFileInfo(int sd, const std::string& fileName, const uint chordFile
 }
 
 bool sendChordFileInfo(int sd, const sharedFileInfo& file) {
-    return sendChordFileInfo(sd, file.name, file.shaHash, file.customHash, info.me.address, info.me.port);
+    return sendChordFileInfo(sd, file.name, file.description, file.category, file.size, file.shaHash, file.customHash, info.me.address, info.me.port);
 }
 
 bool sendChordFileInfo(int sd, const chordFileInfo& file) {
-    return sendChordFileInfo(sd, file.name, file.chordId, file.id, file.address, file.port);
+    return sendChordFileInfo(sd, file.name, file.description, file.category, file.size, file.chordId, file.id, file.address, file.port);
 }
 
-bool readChordFileInfo(int sd, std::string& fileName, uint& chordFileId, uint& fileId, std::string& ownerAddress, uint& ownerPort) {
+bool readChordFileInfo(int sd, std::string& fileName, std::string& fileDescription, 
+        uchar& fileCategory, uint& fileSize, uint& chordFileId, uint& fileId, std::string& ownerAddress, uint& ownerPort) {
     uint len;
     if (-1 == read(sd,&len,4)){
         printf("[server]Error when reading the length of the name of a shared file!\n");
@@ -181,6 +185,21 @@ bool readChordFileInfo(int sd, std::string& fileName, uint& chordFileId, uint& f
             printf("[server]Error when reading the %d th byte of the name of a shared file!\n",i);
             return false;
         }
+    }
+    if (-1 == read(sd,&len,4)){
+        printf("[server]Error when reading the length of the description of a shared file!\n");
+        return false;
+    }
+    fileDescription.resize(len);
+    for (int i=0;i<len;++i){
+        if (-1 == read(sd,&fileDescription[i],1)){
+            printf("[server]Error when reading the %d th byte of the description of a shared file!\n",i);
+            return false;
+        }
+    }
+    if (-1 == read(sd,&fileCategory,1) || -1 == read(sd,&fileSize,4)){
+        printf("[server]Error when reading information about a shared file!\n");
+        return false;
     }
     if (-1 == read(sd,&chordFileId,4) || -1 == read(sd,&fileId,4)){
         printf("[server]Error when reading the ids of a shared file!\n");
@@ -206,7 +225,7 @@ bool readChordFileInfo(int sd, std::string& fileName, uint& chordFileId, uint& f
 }
 
 bool readChordFileInfo(int sd, chordFileInfo& fileInfo) {
-    return readChordFileInfo(sd, fileInfo.name, fileInfo.chordId, fileInfo.id, fileInfo.address, fileInfo.port);
+    return readChordFileInfo(sd, fileInfo.name, fileInfo.description, fileInfo.category, fileInfo.size, fileInfo.chordId, fileInfo.id, fileInfo.address, fileInfo.port);
 }
 
 bool getNodesInClockwiseOrder(std::vector<int>& clock) {

@@ -18,6 +18,7 @@ namespace cmd{
         REMOVE_FILE,
         LIST_FILES_TO_DOWNLOAD,
         LIST_FILES,
+        LIST_CATEGORIES,
         CONFIG_ADD_FILE,
         CONFIG_REMOVE_FILE,
         CONFIG_REMOVE_ALL,
@@ -183,9 +184,9 @@ namespace cmd{
         std::vector<commandInfo>                commands;
         std::unordered_map<commandId, int>      commandIndex;
 
-        bool                                    parseArgument(char arguments[], int firstPos, int lastPos, int cmdIndex, int argumentIndex, cmd::commandResult& result);
-        bool                                    parseAndCheckOptionValue(char arguments[], int startPos, int lastPos, const cmd::commandOption& opt, int position, cmd::commandResult& result);
-        bool                                    parseOption(char arguments[], int firstPos, int lastPos, int cmdIndex, cmd::commandResult& result);
+        bool                                    parseArgument(char arguments[], int firstPos, int& lastPos, int cmdIndex, int argumentIndex, cmd::commandResult& result);
+        bool                                    parseAndCheckOptionValue(char arguments[], int startPos, int& lastPos, const cmd::commandOption& opt, int position, cmd::commandResult& result);
+        bool                                    parseOption(char arguments[], int firstPos, int& lastPos, int cmdIndex, cmd::commandResult& result);
     public:
         commandResult                   parse(const std::string& str);
 
