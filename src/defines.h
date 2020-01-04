@@ -77,11 +77,18 @@
 //          filesNumber times:
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
+//          uint                            - fileDescriptionLen
+//          char[fileDescriptionLen]        - fileDescription
+//          uchar                           - fileCategory
+//          uint                            - fileSize
 //          uint                            - fileId (needed when you download a file)
 #define     SRV_SEARCH_FILE                 12                      // ---
 //          client:
 //          uint                            - fileNameLen
 //          char[fileNameLen]               - fileName
+//          uchar                           - fileCategory
+//          uint                            - fileMinSize
+//          uint                            - fileMaxSize
 //          server:
 //          uint                            - numberOfFiles
 //          numberOfFiles times:

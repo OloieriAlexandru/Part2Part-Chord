@@ -18,11 +18,14 @@
 #define PACKAGE_SIZE        1024u
 #define CHORD_FIRST_PORT    3500
 
+#define FILE_MIN_SIZE       0
+#define FILE_MAX_SIZE       2000000000
 #define FILE_DESC_MAX_LEN   100
 
 #define uchar   unsigned char
 #define uint    unsigned int
 #define ulld    unsigned long long
+#define umap    std::unordered_map
 
 const char* const userConfigFilePath        = ".user.config";
 const char* const userDownloadsFolder       = "downloads/";

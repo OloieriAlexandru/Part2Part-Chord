@@ -21,8 +21,6 @@
 #include "chord.h"
 #include "defines.h"
 
-#define umap std::unordered_map
-
 extern int                                      errno;
 
 node          getFirstNodeInfo();
@@ -111,12 +109,19 @@ void          initCmd(cmd::commandParser& parser);
 static void*  treat(void *);
 
 void          clientAddFileLogic(const cmd::commandResult& command);
-void          clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileName);
+bool          searchFileMatchesFilters(const chordFileInfo& file, uchar fileCategory, int fileMinSize, int fileMaxSize);
+void          clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileName, const uchar fileCategoryId, const int fileMinSize, const int fileMaxSize);
 void          clientSearchFileLogic(const cmd::commandResult& command);
 void          clientDownloadFileLogic(const cmd::commandResult& command);
 void          clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId);
 void          clientListFilesToDownloadLogic(const cmd::commandResult& command);
 void          clientRemoveFileLogic(const cmd::commandResult& command);
+
+node          otherPeer;
+bool          goodOtherPeer(const std::string& peerAddress, uint port);
+bool          otherPeerWasSet();
+void          clientSetPeer(const cmd::commandResult& command);
+void          clientShowPeer(const cmd::commandResult& command);
 
 bool          checkId(int id);
 void          printChordSucc(const cmd::commandResult& command);
@@ -193,6 +198,9 @@ bool check(int argc, char* argv[]){
   info.me.address = myAddress;
   std::string keyStr = info.me.address + std::to_string(info.me.port);
   info.me.key = getHash(keyStr.c_str());
+  
+  otherPeer.address = info.me.address;
+  otherPeer.port = info.me.port;
 
   if (info.me.port != 3500){
     node firstNode = getFirstNodeInfo();
@@ -553,7 +561,8 @@ void listSharedFiles() {
   printf("Shared files: \n");
   for (auto bucket : sharedFiles){
     for (auto file : bucket.second) {
-      printf("%d. name:%s path:%s id:%u\n", fileNumber++, file.name.c_str(), file.path.c_str(), file.customHash);
+      printf("%d. Name: %s, path: %s, description: \"%s\", category: %s, size: %d, id: %u\n", fileNumber++, file.name.c_str(), file.path.c_str(), 
+        file.description.c_str(), getCategoryString(file.category).c_str(), file.size, file.customHash);
     }
   }
   if (fileNumber == 1){
@@ -720,8 +729,11 @@ bool serverListFilesToDownloadSendFile(int sd, sharedFileInfo* sharedFile) {
     return false;
   }
   uint fileSize = sharedFile->name.size();
-  if (-1 == write(sd, &fileSize, 4) || -1 == write(sd, sharedFile->name.c_str(), fileSize) ||
-    -1 == write(sd, &sharedFile->customHash, 4)){
+  uint fileDescriptionLen = sharedFile->description.size();
+  if (-1 == write(sd, &fileSize, 4) || -1 == write(sd, sharedFile->name.c_str(), fileSize)
+    || -1 == write(sd, &fileDescriptionLen, 4) || -1 == write(sd, sharedFile->description.c_str(), fileDescriptionLen)
+    || -1 == write(sd, &sharedFile->category, 1) || -1 == write(sd, &sharedFile->size, 4)
+    || -1 == write(sd, &sharedFile->customHash, 4)){
       printf("[server]Error when sending data about a file to the client!\n");
       return false;
     }
@@ -730,6 +742,8 @@ bool serverListFilesToDownloadSendFile(int sd, sharedFileInfo* sharedFile) {
 
 void serverSearchFiles(int sd) { 
   uint fileNameLen;
+  int fileMinSize, fileMaxSize;
+  uchar fileCategory;
   std::string fileName;
   if (-1 == read(sd,&fileNameLen,4)){
     printf("[server]Failed to read the length of the name of the searched file!\n");
@@ -742,7 +756,17 @@ void serverSearchFiles(int sd) {
       return;
     }
   }
-  uint filesCount = chordFiles[fileName].size();
+  if (-1 == read(sd,&fileCategory,1) || -1 == read(sd,&fileMinSize,4) || -1 == read(sd,&fileMaxSize,4)){
+    printf("[server]Failed to read filter search info!\n");
+    return;
+  }
+  uint filesCount = 0;
+  int n = chordFiles[fileName].size();
+  for (auto& file:chordFiles[fileName]){
+    if (searchFileMatchesFilters(file, fileCategory, fileMinSize, fileMaxSize)){
+      ++filesCount;
+    }
+  }
   if (-1 == write(sd,&filesCount,4)){
     printf("[server]Failed to send back to the client the number of found files!\n");
     return;
@@ -750,8 +774,12 @@ void serverSearchFiles(int sd) {
   if (!filesCount){
     return;
   }
+
   uint fileAddressLen, fileDescriptionLen;
-  for (int i=0;i<filesCount;++i){
+  for (int i=0;i<n;++i){
+    if (!searchFileMatchesFilters(chordFiles[fileName][i], fileCategory, fileMinSize, fileMaxSize)){
+      continue;
+    }
     fileAddressLen = chordFiles[fileName][i].address.size();
     fileDescriptionLen = chordFiles[fileName][i].description.size();
     if (-1 == write(sd,&fileDescriptionLen,4) || -1 == write(sd,chordFiles[fileName][i].description.c_str(),fileDescriptionLen)
@@ -1429,7 +1457,17 @@ void clientAddFileLogic(const cmd::commandResult& command) {
   shareFile(fileName, filePath, fileDescription, fileCategory);
 }
 
-void clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileName){
+bool searchFileMatchesFilters(const chordFileInfo& file, uchar fileCategory, int fileMinSize, int fileMaxSize) {
+  if (!(fileMinSize <= file.size && file.size <= fileMaxSize)){
+    return false;
+  }
+  if (fileCategory == 0){
+    return true;
+  }
+  return fileCategory == file.category;
+}
+
+void clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileName, const uchar fileCategoryId, const int fileMinSize, const int fileMaxSize){
   int sd;
   if (!initClient(sd, nd.address.c_str(), nd.port)){
     return;
@@ -1443,6 +1481,11 @@ void clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileNam
     printf("Error when sending protocol data to the peer that stores information about the searched files!\n");
     return;
   }
+  if (-1 == write(sd,&fileCategoryId,1) || -1 == write(sd,&fileMinSize,4) || -1 == write(sd,&fileMaxSize,4)){
+    close(sd);
+    printf("Error when sending filter information about the searched files!\n");
+    return;
+  }
   if (-1 == read(sd,&filesCount,4)){
     close(sd);
     printf("Error when reading the number of files for the search operation!\n");
@@ -1450,10 +1493,10 @@ void clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileNam
   }
   if (!filesCount){
     close(sd);
-    printf("There are no files in the network with the specified name!\n");
+    printf("There are no files in the network that match your search criteria!\n");
     return;
   }
-  printf("There are %d files in the network with the specified name: \n", filesCount);
+  printf("There %s %d file%s in the network that match your search criteria:\n", (filesCount == 1 ? "is" : "are"), filesCount, (filesCount == 1 ? "" : "s"));
   for (int i=0;i<filesCount;++i){
     if (-1 == read(sd,&fileDescriptionLen,4)){
       close(sd);
@@ -1514,19 +1557,50 @@ void clientSearchFileLogicAnotherPeer(const node& nd, const std::string& fileNam
 
 void clientSearchFileLogic(const cmd::commandResult& command) {
   std::string fileName = command.getStringArgumentValue("file-name"), categoryStr;
-  if (fileName == "none") {
+  if (fileName == "") {
     printf("You have to specify the name and the path of the file! (-name option)\n");
     return;
   }
+
+  categoryStr = command.getStringOptionValue("-category");
+  uchar categoryId = getCategoryId(categoryStr);
+  if (isAnInvalidCategory(categoryId)){
+    printf("Invalid file category!\n");
+    return;
+  }
+  int fileMinSize = command.getNumberOptionValue("-min-size");
+  if (!(FILE_MIN_SIZE <= fileMinSize && fileMinSize <= FILE_MAX_SIZE)){
+    printf("fileMinSize should have a value between %d and %d!\n", FILE_MIN_SIZE, FILE_MAX_SIZE);
+    return;
+  }
+  int fileMaxSize = command.getNumberOptionValue("-max-size");
+  if (!(FILE_MIN_SIZE <= fileMaxSize && fileMaxSize <= FILE_MAX_SIZE)){
+    printf("fileMaxSize should have a value between %d and %d!\n", FILE_MIN_SIZE, FILE_MAX_SIZE);
+    return;
+  }
+  if (!(fileMinSize <= fileMaxSize)){
+    printf("fileMinSize should have a value less than the value of fileMaxSize!\n");
+    return;
+  }
+  
   uint fileChordHash = getHash(fileName.c_str());
   node responsibleNode = serverFindSucc(fileChordHash);
   if (info.me == responsibleNode){
-    uint filesCount = chordFiles[fileName].size();
+    uint filesCount = 0;
+    int n = chordFiles[fileName].size();
+    for (auto& file:chordFiles[fileName]){
+      if (searchFileMatchesFilters(file, categoryId, fileMinSize, fileMaxSize)){
+        ++filesCount;
+      }
+    }
     if (!filesCount){
-      printf("There are no files in the network with the specified name!\n");
+      printf("There are no files in the network that match your search criteria!\n");
     } else {
-      printf("There are %d files in the network with the specified name: \n", filesCount);
-      for (int i=0;i<filesCount;++i){
+      printf("There %s %d file%s in the network that match your search criteria:\n", (filesCount == 1 ? "is" : "are"), filesCount, (filesCount == 1 ? "" : "s"));
+      for (int i=0;i<n;++i){
+        if (!searchFileMatchesFilters(chordFiles[fileName][i], categoryId, fileMinSize, fileMaxSize)){
+          continue;
+        }
         categoryStr = getCategoryString(chordFiles[fileName][i].category);
         printf("%d. Name: %s, description: \"%s\", category: %s, size: %d, id: %d, address: %s, port: %d\n", 
           (i+1), fileName.c_str(), chordFiles[fileName][i].description.c_str(), categoryStr.c_str(), 
@@ -1534,30 +1608,44 @@ void clientSearchFileLogic(const cmd::commandResult& command) {
       }
     }
   } else {
-    clientSearchFileLogicAnotherPeer(responsibleNode, fileName);
+    clientSearchFileLogicAnotherPeer(responsibleNode, fileName, categoryId, fileMinSize, fileMaxSize);
   }
 }
 
 void clientDownloadFileLogic(const cmd::commandResult& command) {
-  std::string fileName  = command.getStringArgumentValue("file-name");
+  std::string fileName, peerIp;
+  int fileId, peerPort;
+  bool useOtherPeer;
+  fileName = command.getStringArgumentValue("file-name");
   if (fileName == ""){
     printf("[client]You have to specify the name of the file you want to download!\n");
     return;
   }
-  int fileId            = command.getNumberArgumentValue("file-id");
+  fileId = command.getNumberArgumentValue("file-id");
   if (fileId == NUM_ARG_MISSING){
     printf("[client]You have to specify the id of the file you want to download!\n");
     return;
   }
-  std::string peerIp    = command.getStringOptionValue("-ip");
-  if (peerIp == "none"){
-    printf("[client]You have to specify the ip of the peer that shares the file you want to download!\n");
-    return;
-  }
-  int peerPort          = command.getNumberOptionValue("-port");
-  if (peerPort == -1){
-    printf("[client]You have to specify the port of the peer that shares the file you want to download!\n");
-    return;
+  useOtherPeer = command.getBooleanOptionValue("-peer");
+  if (useOtherPeer){
+    if (otherPeerWasSet()){
+      peerIp = otherPeer.address;
+      peerPort = otherPeer.port;
+    } else {
+      printf("[client]You haven't saved any peer info!\n");
+      return;
+    }
+  } else {
+    peerIp = command.getStringOptionValue("-ip");
+    if (peerIp == "none"){
+      printf("[client]You have to specify the ip of the peer that shares the file you want to download!\n");
+      return;
+    }
+    peerPort = command.getNumberOptionValue("-port");
+    if (peerPort == -1){
+      printf("[client]You have to specify the port of the peer that shares the file you want to download!\n");
+      return;
+    }
   }
   int sd;
   if (!initClient(sd, peerIp.c_str(), peerPort)){
@@ -1628,16 +1716,30 @@ void clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId
 }
 
 void clientListFilesToDownloadLogic(const cmd::commandResult& command) {
-  std::string peerIp    = command.getStringOptionValue("-ip");
-  if (peerIp == "none"){
-    printf("[client]You have to specify the ip of the peer whose files names you want to get!\n");
-    return;
+  std::string peerIp;
+  int peerPort;
+  bool useOtherPeer = command.getBooleanOptionValue("-peer");
+  if (useOtherPeer){
+    if (otherPeerWasSet()){
+      peerIp = otherPeer.address;
+      peerPort = otherPeer.port;
+    } else {
+      printf("[client]You haven't saved any peer info!\n");
+      return;
+    }
+  } else {
+    peerIp = command.getStringOptionValue("-ip");
+    if (peerIp == "none"){
+      printf("[client]You have to specify the ip of the peer whose files names you want to get!\n");
+      return;
+    }
+    peerPort = command.getNumberOptionValue("-port");
+    if (peerPort == -1){
+      printf("[client]You have to specify the port of the peer whose files names you want to get!\n");
+      return;
+    }
   }
-  int peerPort          = command.getNumberOptionValue("-port");
-  if (peerPort == -1){
-    printf("[client]You have to specify the port of the peer whose files names you want to get!\n");
-    return;
-  }
+
   int sd;
   if (!initClient(sd, peerIp.c_str(), peerPort)){
     return;
@@ -1645,7 +1747,9 @@ void clientListFilesToDownloadLogic(const cmd::commandResult& command) {
 
   std::string fileName  = command.getStringOptionValue("-name");
   uint request = SRV_LIST_FILES, fileNameLen = fileName.size(), filesNumber, peerFileNameLen, peerFileId;
-  std::string peerFileName;
+  uint fileDescriptionLen, fileSize;
+  uchar fileCategory;
+  std::string peerFileName, fileDescription, fileCategoryStr;
 
   if (-1 == write(sd, &request, 4) || -1 == write(sd, &fileNameLen, 4)){    
     printf("[client]Failed to send protocol info to the server!\n");
@@ -1680,18 +1784,43 @@ void clientListFilesToDownloadLogic(const cmd::commandResult& command) {
       int j;
       for (j=0;j<peerFileNameLen;++j){
         if (-1 == read(sd, &peerFileName[j], 1)){
-          printf("[client]Failed to read the %dth character of the file name number %d from the list!\n", j+1, i);
+          printf("[client]Failed to read the %d th character of the file name number %d from the list!\n", j+1, i);
           break;
         }
       }
       if (j < peerFileNameLen){
         break;
       }
+      if (-1 == read(sd,&fileDescriptionLen,4)){
+        printf("[client]Failed to read the number of characters of the description of the %d th file!\n", i);
+        break;
+      }
+      fileDescription.resize(fileDescriptionLen);
+      for (j=0;j<fileDescriptionLen;++j){
+        if (-1 == read(sd,&fileDescription[j],1)){
+          printf("[client]Failed to read the %d th character of the %d th file description!\n", j+1, i);
+          break;
+        }
+      }
+      if (j < fileDescriptionLen){
+        break;
+      }
+      if (-1 == read(sd,&fileCategory,1) || -1 == read(sd,&fileSize,4)){
+        printf("Failed to read information about the %d th file!\n", i);
+        break;
+      }
       if (-1 == read(sd, &peerFileId, 4)){
         printf("[client]Failed to read the file id of the %dth file from the list!", i);
         break;
       }
-      printf("%d. File name: %s, File id: %d\n", i, peerFileName.c_str(), peerFileId);
+      if (!isAnInvalidCategory(fileCategory)){
+        fileCategoryStr = getCategoryString(fileCategory);
+      } else {
+        printf("The category of the %d th file is invalid!\n", i);
+        continue;
+      }
+      printf("%d. Name: %s, description: \"%s\", category: %s, size: %d, id: %d\n", i, peerFileName.c_str(),
+        fileDescription.c_str(), fileCategoryStr.c_str(), fileSize, peerFileId);
     }
   } else {
     printf("[client]The peer you sent the request doesn't share any files at the moment that match your criteria!\n");
@@ -1726,6 +1855,34 @@ void clientRemoveFileLogic(const cmd::commandResult& command) {
   }
   if (removeFileFromNetwork(*toRem)){
     sharedFiles[fileName].erase(sharedFiles[fileName].begin()+position);
+  }
+}
+
+bool goodOtherPeer(const std::string& peerAddress, uint port) {
+  return (otherPeer.address != peerAddress || otherPeer.port != port);
+}
+
+bool otherPeerWasSet() {
+  return (otherPeer.address != info.me.address || otherPeer.port != info.me.port);
+}
+
+void clientSetPeer(const cmd::commandResult& command) {
+  std::string   peerIp = command.getStringArgumentValue("peer-address");
+  int           peerPort = command.getNumberArgumentValue("peer-port");
+  if (goodOtherPeer(peerIp, peerPort)){
+    otherPeer.address = peerIp;
+    otherPeer.port = peerPort;
+    printf("Peer set!\n");
+  } else {
+    printf("You have to set an ip-address and port different from yours!\n");
+  }
+}
+
+void clientShowPeer(const cmd::commandResult& command) {
+  if (otherPeerWasSet()){
+    printf("Current set peer: ip-address: %s, port: %d\n", otherPeer.address.c_str(), otherPeer.port);
+  } else {
+    printf("You haven't set any peer!\n");
   }
 }
 
@@ -1810,6 +1967,12 @@ bool executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& 
     case cmd::commandId::LIST_CATEGORIES:
       printFileCategories(command);
       break;
+    case cmd::commandId::SET_PEER:
+      clientSetPeer(command);
+      break;
+    case cmd::commandId::SHOW_PEER:
+      clientShowPeer(command);
+      break;
     case cmd::commandId::CONFIG_ADD_FILE:
       configFileAddEntry(command);
       break;
@@ -1881,12 +2044,16 @@ void initCmd(cmd::commandParser& parser){
 
   parser.addCommand(cmd::commandId::SEARCH_FILE, "search", "searches for a file in the network");
   parser.addCommandArgumentString(cmd::commandId::SEARCH_FILE, "file-name");
+  parser.addCommandOptionString(cmd::commandId::SEARCH_FILE, "-category:<fileCategory>", "any");
+  parser.addCommandOptionNumber(cmd::commandId::SEARCH_FILE, "-min-size:<fileMinSize>", FILE_MIN_SIZE);
+  parser.addCommandOptionNumber(cmd::commandId::SEARCH_FILE, "-max-size:<fileMaxSize>", FILE_MAX_SIZE);
 
   parser.addCommand(cmd::commandId::DOWNLOAD_FILE, "download", "downloads a file from a peer");
   parser.addCommandArgumentString(cmd::commandId::DOWNLOAD_FILE, "file-name");
   parser.addCommandArgumentNumber(cmd::commandId::DOWNLOAD_FILE, "file-id");
   parser.addCommandOptionString(cmd::commandId::DOWNLOAD_FILE, "-ip:<peerIP>", "none");
   parser.addCommandOptionNumber(cmd::commandId::DOWNLOAD_FILE, "-port:<peerPort>", -1);
+  parser.addCommandOptionBoolean(cmd::commandId::DOWNLOAD_FILE, "-peer", false);
 
   parser.addCommand(cmd::commandId::REMOVE_FILE, "rm", "removes a file from the network");
   parser.addCommandArgumentString(cmd::commandId::REMOVE_FILE, "file-name");
@@ -1896,9 +2063,16 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommandOptionString(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "-ip:<peerIP>", "none");
   parser.addCommandOptionString(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "-name:<fileName>", "");
   parser.addCommandOptionNumber(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "-port:<peerPort>", -1);
+  parser.addCommandOptionBoolean(cmd::commandId::LIST_FILES_TO_DOWNLOAD, "-peer", false);
 
   parser.addCommand(cmd::commandId::LIST_FILES, "list-files", "lists all my shared files");
   parser.addCommand(cmd::commandId::LIST_CATEGORIES, "list-categories", "lists the available file categories");
+
+  parser.addCommand(cmd::commandId::SET_PEER, "set-peer", "saves the address and ip of a peer, which can be later used is other commands");
+  parser.addCommandArgumentString(cmd::commandId::SET_PEER, "peer-address");
+  parser.addCommandArgumentNumber(cmd::commandId::SET_PEER, "peer-port");
+
+  parser.addCommand(cmd::commandId::SHOW_PEER, "show-peer", "prints the saved address and ip of a peer");
 
   parser.addCommand(cmd::commandId::CONFIG_ADD_FILE, "config-add-file", "adds an entry to the auto-upload list file");
   parser.addCommandArgumentString(cmd::commandId::CONFIG_ADD_FILE, "file-name");

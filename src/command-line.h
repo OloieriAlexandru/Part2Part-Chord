@@ -19,6 +19,8 @@ namespace cmd{
         LIST_FILES_TO_DOWNLOAD,
         LIST_FILES,
         LIST_CATEGORIES,
+        SET_PEER,
+        SHOW_PEER,
         CONFIG_ADD_FILE,
         CONFIG_REMOVE_FILE,
         CONFIG_REMOVE_ALL,
