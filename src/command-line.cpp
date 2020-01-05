@@ -16,6 +16,12 @@ std::string cmd::commandEnumToString(cmd::commandId cmdId){
             return "list-files";
         case cmd::commandId::LIST_CATEGORIES:
             return "list-categories";
+        case cmd::commandId::DOWNLOADS_LIST:
+            return "downloads-list";
+        case cmd::commandId::DOWNLOADS_REMOVE:
+            return "downloads-rm";
+        case cmd::commandId::DOWNLOAD_HISTORY:
+            return "history";
         case cmd::commandId::SET_PEER:
             return "set-peer";
         case cmd::commandId::SHOW_PEER:
@@ -23,7 +29,7 @@ std::string cmd::commandEnumToString(cmd::commandId cmdId){
         case cmd::commandId::CONFIG_ADD_FILE:
             return "config-add-file";
         case cmd::commandId::CONFIG_REMOVE_FILE:
-            return "config-rm-file";
+            return "config-rm";
         case cmd::commandId::CONFIG_REMOVE_ALL:
             return "config-rm-all";
         case cmd::commandId::CONFIG_LIST_FILES:

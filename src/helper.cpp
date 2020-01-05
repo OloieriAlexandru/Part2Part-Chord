@@ -114,6 +114,20 @@ bool fileExists(const char* filePath) {
     return true;
 }
 
+bool isDirectory(const char* path) {
+    if (!path){
+        return false;
+    }
+    struct stat st;
+    if (stat(path,&st)){
+        return false;
+    }
+    if ((st.st_mode & S_IFMT) == S_IFDIR){
+        return true;
+    }
+    return false;
+}
+
 void readConfigFileDescription(std::ifstream& fileIn, std::string& description) {
     int descLen;
     fileIn >> descLen;
@@ -293,4 +307,116 @@ void configFileAutoAdd(const cmd::commandResult& command) {
         return;
     }
     close(fd);
+}
+
+bool readSpecialStringFromFile(std::istream& fileIn, std::string& str){
+    int len;
+    if (!(fileIn>>len)){
+        return false;
+    }
+    fileIn.get();
+    str.resize(len);
+    for (int i=0;i<len;++i){
+        str[i] = fileIn.get();
+    }
+    return true;
+}
+
+bool historyFileExists() {
+    return fileExists(userDownloadsHistory);
+}
+
+bool historyFileCreate() {
+    return fileCreate(userDownloadsHistory);
+}
+
+bool historyFileInit() {
+    if (!historyFileExists()){
+        return historyFileCreate();
+    }
+    return true;
+}
+
+void addDownloadedFileToHistory(const std::string& fileName, const std::string& filePath) {
+    if (!historyFileInit()){
+        printf("Failed to check the existence of the downloads history file!\n");
+        return;
+    }
+    std::ofstream fileOut(userDownloadsHistory, std::fstream::app);
+    if (!fileOut.is_open()){
+        printf("Failed to open the downloads history file for writing!\n");
+        return;
+    }
+    std::time_t t = std::time(0);
+    fileOut<<fileName.size()<<' '<<fileName<<' '<<filePath.size()<<' '<<filePath<<' '<<t<<'\n';
+    fileOut.close();
+}
+
+void printDownloadHistory(const cmd::commandResult& command) {
+    if (!historyFileExists()){
+        printf("You haven't downloaded any files!\n");
+        return;
+    }
+    std::ifstream fileIn(userDownloadsHistory);
+    if (!fileIn.is_open()){
+        printf("Failed to open the downloads history file for reading!\n");
+        return;
+    }
+    std::string fileName, filePath;
+    std::time_t t;
+    int co, limit = command.getNumberOptionValue("-first");
+    std::vector<std::pair<std::time_t,std::pair<std::string,std::string>>> hist;
+    while (readSpecialStringFromFile(fileIn, fileName)){
+        readSpecialStringFromFile(fileIn, filePath);
+        fileIn>>t;
+        hist.push_back(make_pair(t, make_pair(fileName, filePath)));
+        }
+    co = (limit < hist.size() ? limit : hist.size());
+    for (int i=0;i<co;++i){
+        printf("%d. Name: %s, path: %s, time: %s", i+1, hist[i].second.first.c_str(), hist[i].second.second.c_str(), std::ctime(&hist[i].first));
+    }
+    hist.clear();
+    fileIn.close();
+}
+
+void printDownloadsFolderFiles(const cmd::commandResult& command){
+    DIR *dir;
+    struct dirent *de;
+	if (!isDirectory(userDownloadsFolder)){
+        printf("Error! %s is not a directory!\n", userDownloadsFolder);
+        return;
+    }
+	if(NULL == (dir = opendir(userDownloadsFolder))){
+        printf("Failed to open the \"downloads\" folder!\n");
+        return;
+    }
+    int count = 1;
+	while(NULL != (de = readdir(dir))) {
+        if(strcmp(de->d_name,".") && strcmp(de->d_name,"..") && strcmp(de->d_name,".gitkeep")){
+            printf("%d. %s\n", count++, de->d_name);
+		}
+    }
+	closedir(dir);
+
+    if (count == 1){
+        printf("There are no files in the \"downloads\" folder!\n");
+    }
+}
+
+void removeFileFromDownloadsFolder(const cmd::commandResult& command) {
+    std::string fileName = command.getStringArgumentValue("file-name");
+    if (fileName == ""){
+        printf("You have to specify the name of the file you want to delete!\n");
+        return;
+    }
+    std::string filePath = userDownloadsFolder + fileName;
+    if (!fileExists(filePath.c_str())){
+        printf("The specified file doesn't exist!\n");
+        return;
+    }
+    if (!remove(filePath.c_str())){
+        printf("File removed successfully!\n");
+    } else {
+        printf("Error when deleting the file!\n");
+    }
 }

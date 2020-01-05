@@ -28,6 +28,7 @@
 #define umap    std::unordered_map
 
 const char* const userConfigFilePath        = ".user.config";
+const char* const userDownloadsHistory      = ".user.history";
 const char* const userDownloadsFolder       = "downloads/";
 const char* const userDownloadsExtension    = ".txt";
 

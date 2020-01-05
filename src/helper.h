@@ -5,12 +5,15 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <dirent.h>
 #include <stdarg.h>
 
 #include <fstream>
 #include <string>
 #include <iostream>
 #include <vector>
+#include <mutex>
+#include <ctime>
 
 #include "hash/sha1.h"
 
@@ -21,6 +24,18 @@
 struct  threadInfo {
     int sd;
     int threadNo;
+};
+
+class guardLock {
+private:
+    std::mutex& m;
+public:
+    guardLock(std::mutex& mt): m(mt){ 
+        m.lock();
+    }
+    ~guardLock(){
+        m.unlock();
+    }
 };
 
 extern std::vector<std::string> fileCategories;
@@ -42,6 +57,7 @@ uint    getCustomHash(const char* str);
 uint    getFileSize(const char* filePath);
 bool    fileCreate(const char* fileName);
 bool    fileExists(const char* filePath);
+bool    isDirectory(const char* path);
 
 void        readConfigFileDescription(std::ifstream& fileIn, std::string& description);
 bool        configFileGetFlagValue();
@@ -57,5 +73,16 @@ void    configFileRemoveEntry(const cmd::commandResult& command);
 void    configFileRemoveAll(const cmd::commandResult& command);
 void    configFileListAll(const cmd::commandResult& command);
 void    configFileAutoAdd(const cmd::commandResult& command);
+
+bool        readSpecialStringFromFile(std::istream& fileIn, std::string& str);
+
+bool        historyFileExists();
+bool        historyFileCreate();
+bool        historyFileInit();
+void        addDownloadedFileToHistory(const std::string& fileName, const std::string& filePath);
+
+void        printDownloadHistory(const cmd::commandResult& command);
+void        printDownloadsFolderFiles(const cmd::commandResult& command);
+void        removeFileFromDownloadsFolder(const cmd::commandResult& command);
 
 #endif // HELPER_H

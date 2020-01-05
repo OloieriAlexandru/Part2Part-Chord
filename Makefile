@@ -6,14 +6,9 @@ all: clean release
 
 release: clean
 	${CCPP} ./${SRCFOLDER}/server.cpp ./${SRCFOLDER}/command-line.cpp ./${SRCFOLDER}/helper.cpp ./${SRCFOLDER}/hash/sha1.cpp ./${SRCFOLDER}/chord.cpp -o ./${BUILDFOLDER}/server.bin -lpthread
-	${CCPP} ./${SRCFOLDER}/client.cpp -o ./${BUILDFOLDER}/client.bin -lpthread
-
-runcl: 
-	./${BUILDFOLDER}/client.bin
 
 runsv:
 	./${BUILDFOLDER}/server.bin 3500
 
 clean:
 	rm -f ${BUILDFOLDER}/server.bin
-	rm -f ${BUILDFOLDER}/client.bin

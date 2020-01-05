@@ -15,6 +15,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <mutex>
 
 #include "command-line.h"
 #include "helper.h"
@@ -27,6 +28,9 @@ node          getFirstNodeInfo();
 bool          isFirstChordNode(const std::string& address, uint port);
 bool          check(int argc, char* argv[]);
 void          shareFilesFromConfigFile();
+
+std::mutex                                      chordFilesMutex;
+std::mutex                                      chordNodeMutex;
 
 nodeInfo                                        info;
 umap<std::string,std::vector<sharedFileInfo>>   sharedFiles;
@@ -597,6 +601,9 @@ void serverAddSharedFile(int sd) {
   if (!readChordFileInfo(sd, newFile)){
     return;
   }
+
+  guardLock lock(chordFilesMutex);
+  
   uint response = serverAddSharedFileLogic(newFile);
   if (-1 == write(sd,&response,4)) {
     printf("[server]Error when sending the response back to the client (\"serverAddSharedFile\")!\n");
@@ -818,6 +825,9 @@ void serverRemoveFile(int sd) {
    if (!readChordFileInfo(sd, removedFile)){
     return;
   }
+  
+  guardLock lock(chordFilesMutex);
+  
   uint response = serverRemoveFileLogic(removedFile);
   if (-1 == write(sd,&response,4)) {
     printf("[server]Error when sending the response back to the client (\"serverRemoveFile\")!\n");
@@ -986,6 +996,9 @@ void serverUpdateSuccessor(int sd) {
     return;
   }
   debugMessage("Got a request: update my successor, the new one is id %u\n", newSucc.key);
+
+  guardLock lock(chordNodeMutex);
+  
   info.fTable.fingers[0] = newSucc;
 }
 
@@ -1018,6 +1031,9 @@ void serverUpdatePredecessor(int sd){
     return;
   }
   debugMessage("Got a request: update my predecessor, the new one is id %u\n", newPred.key);
+
+  guardLock lock(chordNodeMutex);
+
   info.fTable.predecessor = newPred;
 }
 
@@ -1030,6 +1046,8 @@ void serverUpdateFingerTable(int sd) {
   }
 
   debugMessage("Got a request: node %u has me as its %u th finger\n", nd.key, fingerIndex);
+
+  guardLock lock(chordNodeMutex);
 
   if (between(nd.key, info.me.key, (int)info.fTable.fingers[fingerIndex].key-1)){
     info.fTable.fingers[fingerIndex] = nd;
@@ -1119,6 +1137,9 @@ void serverAddFilesFromPredecessor(int sd){
   if (response == SRV_ADD_PREDECESSOR_FILES_NO){
     return;
   }
+
+  guardLock lock(chordNodeMutex);
+  
   uint filesCount = 0;
   chordFileInfo predFile;
   if (-1 == read(sd,&filesCount,4)){
@@ -1143,6 +1164,9 @@ void serverReplaceNodeFromFingersTable(int sd) {
   if (nodeThatLeft == info.me){
     return;
   }
+
+  guardLock lock(chordNodeMutex);
+  
   succ = info.fTable.fingers[0];
   for (int i=0;i<SHA_HASH_BITS;++i){
     if (info.fTable.fingers[i] == nodeThatLeft){
@@ -1227,6 +1251,9 @@ void serverChordStabilization(int sd) {
   if (!readNodeInfo(sd, np)){
     return;
   }
+
+  guardLock lock(chordNodeMutex);
+  
   if (between(np.key, info.fTable.predecessor.key+1, (int)info.me.key-1)){
     info.fTable.predecessor = np;
   }
@@ -1681,15 +1708,16 @@ void clientDownloadFileLogic(const cmd::commandResult& command) {
 
 void clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId) {
   std::string fileIdAsString = std::to_string(fileId);
-  std::string newFileName = std::string(userDownloadsFolder) + fileName + std::string("::") + fileIdAsString + std::string(userDownloadsExtension);
-  if (!fileExists(newFileName.c_str())){
-    if (!fileCreate(newFileName.c_str())){
-      printf("[client]Failed to create new file named %s\n", newFileName.c_str());
+  std::string newFileName = fileName + std::string("::") + fileIdAsString + std::string(userDownloadsExtension);
+  std::string filePath = std::string(userDownloadsFolder) + newFileName;
+  if (!fileExists(filePath.c_str())){
+    if (!fileCreate(filePath.c_str())){
+      printf("[client]Failed to create new file named %s\n", filePath.c_str());
       return;
     }
-    int fd = open(newFileName.c_str(), O_WRONLY);
+    int fd = open(filePath.c_str(), O_WRONLY);
     if (-1 == fd){
-      printf("[client]Failed to open the file where the information is supposed to be downloaded %s\n", newFileName.c_str());
+      printf("[client]Failed to open the file where the information is supposed to be downloaded %s\n", filePath.c_str());
       return;
     }
     char package[PACKAGE_SIZE];
@@ -1709,8 +1737,10 @@ void clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId
       }
     }
     close(fd);
+    addDownloadedFileToHistory(newFileName, filePath);
     printf("Download complete!\n");
   } else {
+    printf("The file already exists in the directory!\n");
     // to do?
   }
 }
@@ -1967,6 +1997,15 @@ bool executeClientCommand(const cmd::commandParser& parser, cmd::commandResult& 
     case cmd::commandId::LIST_CATEGORIES:
       printFileCategories(command);
       break;
+    case cmd::commandId::DOWNLOADS_LIST:
+      printDownloadsFolderFiles(command);
+      break;
+    case cmd::commandId::DOWNLOADS_REMOVE:
+      removeFileFromDownloadsFolder(command);
+      break;
+    case cmd::commandId::DOWNLOAD_HISTORY:
+      printDownloadHistory(command);
+      break;
     case cmd::commandId::SET_PEER:
       clientSetPeer(command);
       break;
@@ -2068,6 +2107,14 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommand(cmd::commandId::LIST_FILES, "list-files", "lists all my shared files");
   parser.addCommand(cmd::commandId::LIST_CATEGORIES, "list-categories", "lists the available file categories");
 
+  parser.addCommand(cmd::commandId::DOWNLOADS_LIST, "downloads-list", "lists all the files from \"downloads\" folder");
+
+  parser.addCommand(cmd::commandId::DOWNLOADS_REMOVE, "downloads-rm", "removes a file from \"downloads\" folder");
+  parser.addCommandArgumentString(cmd::commandId::DOWNLOADS_REMOVE, "file-name");
+
+  parser.addCommand(cmd::commandId::DOWNLOAD_HISTORY, "history", "lists the history of downloaded files");
+  parser.addCommandOptionNumber(cmd::commandId::DOWNLOAD_HISTORY, "-first:<count>", 1000);
+
   parser.addCommand(cmd::commandId::SET_PEER, "set-peer", "saves the address and ip of a peer, which can be later used is other commands");
   parser.addCommandArgumentString(cmd::commandId::SET_PEER, "peer-address");
   parser.addCommandArgumentNumber(cmd::commandId::SET_PEER, "peer-port");
@@ -2080,7 +2127,7 @@ void initCmd(cmd::commandParser& parser){
   parser.addCommandOptionString(cmd::commandId::CONFIG_ADD_FILE, "-description:<fileDescripton>", "");
   parser.addCommandOptionString(cmd::commandId::CONFIG_ADD_FILE, "-category:<fileCategory>", "");
 
-  parser.addCommand(cmd::commandId::CONFIG_REMOVE_FILE, "config-rm-file", "removes an entry from the auto-upload list file");
+  parser.addCommand(cmd::commandId::CONFIG_REMOVE_FILE, "config-rm", "removes an entry from the auto-upload list file");
   parser.addCommandArgumentString(cmd::commandId::CONFIG_REMOVE_FILE, "file-name");
 
   parser.addCommand(cmd::commandId::CONFIG_REMOVE_ALL, "config-rm-all", "removes all the entries from the auto-upload list file");
