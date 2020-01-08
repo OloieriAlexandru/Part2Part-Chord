@@ -2,5 +2,6 @@
 /downloads/*
 /.user.config
 /.user.history
+/uploads/*
 
 !/build/.gitkeep

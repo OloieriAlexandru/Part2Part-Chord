@@ -200,6 +200,9 @@ bool check(int argc, char* argv[]){
   }
   
   info.me.address = myAddress;
+  
+  // std::cout<<"Ip address: "; std::cin>>info.me.address;
+
   std::string keyStr = info.me.address + std::to_string(info.me.port);
   info.me.key = getHash(keyStr.c_str());
   
@@ -655,29 +658,65 @@ void serverDownloadFileLogic(int sd) {
 
 void serverDownloadFileUpload(int sd, sharedFileInfo* sharedFile) {
   char package[PACKAGE_SIZE];
-  uint fileSize = getFileSize(sharedFile->path.c_str());
+  uint fileSize = getFileSize(sharedFile->path.c_str()), response;
+  uint fileClientSize;
   int fd;
   if (-1 == (fd = open(sharedFile->path.c_str(), O_RDONLY))){
     printf("[server]Failed to open the file to share!\n");
     return;
   }
-  uint packages = fileSize / PACKAGE_SIZE + (fileSize % PACKAGE_SIZE ? 1 : 0);
-  if (-1 == write(sd, &packages, 4)){
-    printf("[server]Failed to sent the number of packages to the client!\n");
+  if (-1 == write(sd,&fileSize,4)){
+    printf("[server]Failed to send the file size to the client!\n");
     return;
   }
-  uint currentPackageSize = PACKAGE_SIZE;
-  for (int i=1;i<=packages;++i){
-    if (i == packages){
-      currentPackageSize = ((fileSize % PACKAGE_SIZE != 0) ? fileSize % PACKAGE_SIZE : PACKAGE_SIZE);
-    }
-    if (-1 == read(fd, package, currentPackageSize)){
-      printf("[server]Failed to read package number %d from the file!\n", i);
+  if (-1 == read(sd,&fileClientSize,4)){
+    printf("[server]Failed to read the size of the file on the client's computer!\n");
+    return;
+  }
+  if (fileClientSize == 0){
+    uint packages = fileSize / PACKAGE_SIZE + (fileSize % PACKAGE_SIZE ? 1 : 0);
+    if (-1 == write(sd, &packages, 4)){
+      printf("[server]Failed to sent the number of packages to the client!\n");
       return;
     }
-    if (-1 == write(sd, &currentPackageSize, 4) || -1 == write(sd, package, currentPackageSize)){
-      printf("[server]Failed to send information about the package number %d to the client!\n", i);
+    uint currentPackageSize = PACKAGE_SIZE;
+    for (int i=1;i<=packages;++i){
+      if (i == packages){
+        currentPackageSize = ((fileSize % PACKAGE_SIZE != 0) ? fileSize % PACKAGE_SIZE : PACKAGE_SIZE);
+      }
+      if (-1 == read(fd, package, currentPackageSize)){
+        printf("[server]Failed to read package number %d from the file!\n", i);
+        return;
+      }
+      if (-1 == write(sd, &currentPackageSize, 4) || -1 == write(sd, package, currentPackageSize)){
+        printf("[server]Failed to send information about the package number %d to the client!\n", i);
+        return;
+      }
+    }
+  } else {
+    uint remainingSize = fileSize - fileClientSize;
+    uint packages = remainingSize / PACKAGE_SIZE + (remainingSize % PACKAGE_SIZE ? 1 : 0);
+    if (-1 == write(sd,&packages,4)){
+      printf("[server]Failed to send the number of packages to the client!\n");
       return;
+    }
+    uint currentPackageSize = PACKAGE_SIZE;
+    if (-1 == lseek(fd,fileClientSize,SEEK_SET)){
+      printf("[server]Failed to seek to the right position in file!\n");
+      return;
+    }
+    for (int i=1;i<=packages;++i){
+      if (i == packages){
+        currentPackageSize = ((remainingSize % PACKAGE_SIZE != 0) ? remainingSize % PACKAGE_SIZE : PACKAGE_SIZE);
+      }
+      if (-1 == read(fd, package, currentPackageSize)){
+        printf("[server]Failed to read package number %d from the file!\n", i);
+        return;
+      }
+      if (-1 == write(sd, &currentPackageSize, 4) || -1 == write(sd, package, currentPackageSize)){
+        printf("[server]Failed to send information about the package number %d to the client!\n", i);
+        return;
+      }
     }
   }
 }
@@ -1710,7 +1749,17 @@ void clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId
   std::string fileIdAsString = std::to_string(fileId);
   std::string newFileName = fileName + std::string("::") + fileIdAsString + std::string(userDownloadsExtension);
   std::string filePath = std::string(userDownloadsFolder) + newFileName;
+  uint myFileSize, fileSize;
+  if (-1 == read(sd,&fileSize,4)){
+    printf("[client]Failed to read the size of the file!\n");
+    return;
+  }
   if (!fileExists(filePath.c_str())){
+    myFileSize = 0;
+    if (-1 == write(sd,&myFileSize,4)){
+      printf("[client]Failed to send the server the current file size!\n");
+      return;
+    }
     if (!fileCreate(filePath.c_str())){
       printf("[client]Failed to create new file named %s\n", filePath.c_str());
       return;
@@ -1724,14 +1773,17 @@ void clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId
     uint packagesNumber, currentPackageSize;
     if (-1 == read(sd, &packagesNumber, 4)){
       printf("[client]Failed to read the number of packages that were about to be sent!\n");
+      close(fd);
       return;
     }
     for (int i=1;i<=packagesNumber;++i){
       if (-1 == read(sd, &currentPackageSize, 4) || -1 == read(sd, package, currentPackageSize)){
         printf("[client]Error when reading package number %d from the network!\n", i);
+        close(fd);
         return;
       }
       if (-1 == write(fd, package, currentPackageSize)){
+        close(fd);
         printf("[client]Error when writing package number %d to the file!\n", i);
         return;
       }
@@ -1740,8 +1792,43 @@ void clientDownloadFileDownload(int sd, const std::string& fileName, uint fileId
     addDownloadedFileToHistory(newFileName, filePath);
     printf("Download complete!\n");
   } else {
-    printf("The file already exists in the directory!\n");
-    // to do?
+    myFileSize = getFileSize(filePath.c_str());
+    if (-1 == write(sd,&myFileSize,4)){
+      printf("[client]Failed to send the server the current file size!\n");
+      return;
+    }
+    int fd = open(filePath.c_str(), O_WRONLY | O_APPEND);
+    if (-1 == fd){
+      printf("[client]Failed to open the file where the information is supposed to be downloaded %s!\n", filePath.c_str());
+      return;
+    }
+    char package[PACKAGE_SIZE];
+    uint packagesNumber, currentPackageSize;
+    if (-1 == read(sd, &packagesNumber, 4)){
+      printf("[client]Failed to read the number of packages that were about to be sent!\n");
+      close(fd);
+      return;
+    }
+    if (packagesNumber == 0){
+      printf("You have downloaded the same file before!\n");
+      close(fd);
+      return;
+    }
+    for (int i=1;i<=packagesNumber;++i){
+      if (-1 == read(sd, &currentPackageSize, 4) || -1 == read(sd, package, currentPackageSize)){
+        printf("[client]Error when reading package number %d from the network!\n", i);
+        close(fd);
+        return;
+      }
+      if (-1 == write(fd, package, currentPackageSize)){
+        close(fd);
+        printf("[client]Error when writing package number %d to the file!\n", i);
+        return;
+      }
+    }
+    close(fd);
+    addDownloadedFileToHistory(newFileName, filePath);
+    printf("Download complete!\n");
   }
 }
 

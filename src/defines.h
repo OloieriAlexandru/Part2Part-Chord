@@ -1,7 +1,7 @@
 #ifndef DEFINES_H
 #define DEFINES_H
 
-// The ids of the operations the server can execute + information about what will be sent by the client
+// The ids of the operations the server can execute + information about what will be sent by the client and server
 
 #define     SRV_ERROR                       0                       // ---
 //          -
@@ -63,6 +63,9 @@
 //          client:
 //          endOperation
 #define     SRV_DOWNLOAD_FILE_OK_BEGIN      102
+//          client:
+//          uint                            - currentFileSize
+//          server:
 //          uint                            - numberOfPackages (1024 bytes each)
 //          numberOfPackages times:
 //          uint                            - packageSize
